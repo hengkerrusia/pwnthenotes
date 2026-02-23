@@ -1,3 +1,67 @@
 @use "./base.scss";
+@use "./variables.scss" as *;
 
-// put your custom CSS here!
+// Mobile font size adjustments
+@media all and ($mobile) {
+  // Reduce page title size on mobile
+  .page-title {
+    font-size: 1.2rem !important;
+  }
+  
+  // Smaller article title
+  article > h1 {
+    font-size: 1.5rem !important;
+  }
+  
+  // Smaller headings
+  h1 {
+    font-size: 1.4rem !important;
+    margin-top: 1.5rem;
+  }
+  
+  h2 {
+    font-size: 1.2rem !important;
+    margin-top: 1.3rem;
+  }
+  
+  h3 {
+    font-size: 1.05rem !important;
+    margin-top: 1.1rem;
+  }
+  
+  // Body text slightly smaller
+  p, li, td {
+    font-size: 0.95rem;
+  }
+  
+  // Reduce code font size
+  code {
+    font-size: 0.8em;
+  }
+  
+  pre > code {
+    font-size: 0.75rem;
+  }
+}
+
+// Hacker theme enhancements
+// Terminal-style cursor effect for code blocks
+pre {
+  position: relative;
+}
+
+// Syntax highlighting improvements for hacker theme
+code {
+  font-feature-settings: "liga" 1;
+}
+
+// Link hover effect - subtle glow
+a:hover {
+  text-shadow: 0 0 8px color-mix(in srgb, var(--secondary) 40%, transparent);
+}
+
+// Selection color matches theme
+::selection {
+  background: var(--secondary);
+  color: var(--light);
+}
