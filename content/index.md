@@ -14,6 +14,7 @@ description: Kumpulan write-up wargame keamanan web, riset kerentanan, dan catat
 | [Akses Data](akses-data.md) | Access Control |
 | [Ngga Harus Login](ngga-harus-login.md) | Access Control |
 | [Akses Data Lagi](akses-data-lagi.md) | Access Control |
+| [Jadi Admin](jadi-admin.md) | Access Control |
 
 
 
