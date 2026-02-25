@@ -12,6 +12,11 @@ description: Kumpulan write-up wargame keamanan web, riset kerentanan, dan catat
 | Nama | Kategori |
 |------|----------|
 | [Akun Admin](akun-admin.md) | Access Control |
+| [Akun Admin Lagi](akun-admin-lagi.md) | Access Control |
+| [Akses Data](akses-data.md) | Access Control |
+| [Ngga Harus Login](ngga-harus-login.md) | Access Control |
+| [Akses Data Lagi](akses-data-lagi.md) | Access Control |
+
 
 
 
