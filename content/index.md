@@ -3,8 +3,6 @@ title: Pwn The Notes
 description: Kumpulan write-up wargame keamanan web, riset kerentanan, dan catatan CTF
 ---
 
-# Pwn The Notes
-
 **Pwn The Notes** adalah catatan yang didedikasikan untuk riset keamanan web, write-up wargame, dan tantangan Capture The Flag (CTF) terutama dari [PwnTheWebsite](https://www.pwnthe.website). *Digital garden* ini mendokumentasikan perjalanan mengeksplorasi kerentanan dunia nyata, temuan [[bug bounty]], [CVE](cve.md), dan konsep keamanan secara terstruktur dan saling terhubung.
 
 ## Koleksi Challenge
