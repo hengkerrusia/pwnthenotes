@@ -21,6 +21,7 @@ description: Kumpulan write-up wargame keamanan web, riset kerentanan, dan catat
 | [Rahasia Suryo](rahasia-suryo.md) | Input Injection |
 | [Rahasia Mega](rahasia-mega.md) | Input Injection |
 | [Rahasia Anis](rahasia-anis.md) | Input Injection |
+| [Rahasia Ganjar](rahasia-ganjar.md) | Input Injection |
 
 
 
