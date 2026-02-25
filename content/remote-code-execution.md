@@ -20,4 +20,4 @@ RCE adalah vonis hukuman cacat arsitektur keamanan dengan ganjaran skor CVSS das
 * Kehilangan data pelanggan tak terkira jumlahnya (*Data breach* skala masif).
 
 ## Mitigasi
-Karena sumber permasalahannya bukan satu-dimensi, upaya menanggulangi ancaman berakar di lapisan arsitektur dengan menggunakan prasyarat *Secure Coding Standards*, implementasi *Web Application Firewall* (WAF) sebagai lapis pertahanan semantik, memutakhirkan pembaruan perangkat lunak reguler, serta menggunakan *sandbox* isolatif atau Container (seperti Docker) sebagai jala pengaman.
+Karena sumber permasalahannya bukan satu-dimensi, upaya menanggulangi ancaman berakar di lapisan arsitektur dengan menggunakan prasyarat *Secure Coding Standards*, implementasi *[[web-application-firewall]]* (WAF) sebagai lapis pertahanan semantik, memutakhirkan pembaruan perangkat lunak reguler, serta menggunakan *sandbox* isolatif atau Container (seperti Docker) sebagai jala pengaman.

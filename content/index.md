@@ -22,6 +22,7 @@ description: Kumpulan write-up wargame keamanan web, riset kerentanan, dan catat
 | [Rahasia Mega](rahasia-mega.md) | Input Injection |
 | [Rahasia Anis](rahasia-anis.md) | Input Injection |
 | [Rahasia Ganjar](rahasia-ganjar.md) | Input Injection |
+| [Rahasia Sahroni](rahasia-sahroni.md) | Input Injection |
 
 
 
