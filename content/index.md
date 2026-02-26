@@ -1,38 +1,11 @@
 ---
 title: Pwn The Notes
-description: Kumpulan write-up wargame keamanan web, riset kerentanan, dan catatan CTF
+description: Perpustakaan Pengetahuan Kerentanan Keamanan Web — Taksonomi Mutasi & Referensi Permukaan Serangan
 ---
 
-**Pwn The Notes** adalah catatan yang didedikasikan untuk riset keamanan web, write-up wargame, dan tantangan Capture The Flag (CTF) terutama dari [PwnTheWebsite](https://www.pwnthe.website). *Digital garden* ini mendokumentasikan perjalanan mengeksplorasi kerentanan dunia nyata, temuan [[bug bounty]], [CVE](cve.md), dan konsep keamanan secara terstruktur dan saling terhubung.
+## Apa neh?
+**Pwn The Notes** adalah perpustakaan pengetahuan kerentanan keamanan web yang secara sistematis mengklasifikasikan lebih dari 100 kelas kerentanan web ke dalam 13 kategori. Berbeda dengan daftar cheat sheet konvensional atau daftar CVE, setiap topik disusun berdasarkan kriteria mutasi struktural — apa yang dimutasi, ketidaksesuaian apa yang dihasilkan, dan di mana hal tersebut dimanfaatkan sebagai serangan.
 
-## Koleksi Challenge
+Setiap topik merupakan dokumen referensi yang terstruktur secara mendalam, mencakup seluruh permukaan serangan dari suatu kelas kerentanan melalui taksonomi tiga sumbu (Target Mutasi, Jenis Ketidaksesuaian/Bypass, Skenario Serangan).
 
-| Nama | Kategori |
-|------|----------|
-| [Akun Admin](akun-admin.md) | Access Control |
-| [Akun Admin Lagi](akun-admin-lagi.md) | Access Control |
-| [Akses Data](akses-data.md) | Access Control |
-| [Ngga Harus Login](ngga-harus-login.md) | Access Control |
-| [Akses Data Lagi](akses-data-lagi.md) | Access Control |
-| [Jadi Admin](jadi-admin.md) | Access Control |
-| [Jadi Member](jadi-member.md) | Access Control |
-| [Rahasia Bahlil](rahasia-bahlil.md) | Input Injection |
-| [Rahasia Joko](rahasia-joko.md) | Input Injection |
-| [Rahasia Suryo](rahasia-suryo.md) | Input Injection |
-| [Rahasia Mega](rahasia-mega.md) | Input Injection |
-| [Rahasia Anis](rahasia-anis.md) | Input Injection |
-| [Rahasia Ganjar](rahasia-ganjar.md) | Input Injection |
-| [Rahasia Sahroni](rahasia-sahroni.md) | Input Injection |
-| [Rahasia Kuya](rahasia-kuya.md) | Input Injection |
-| [Rahasia Eko](rahasia-eko.md) | Input Injection |
-
-
-
-
-## Penyangkalan
-
-Semua konten di sini hanya untuk **tujuan edukasi**. Teknik dan kerentanan yang dibahas hanya boleh dipraktikkan di lingkungan yang berwenang. Jangan pernah gunakan pengetahuan ini untuk menyerang sistem tanpa izin eksplisit.
-
----
-
-*Happy Hacking! 🚩*
+## Topik
