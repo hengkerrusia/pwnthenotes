@@ -9,3 +9,9 @@ description: Perpustakaan Pengetahuan Kerentanan Keamanan Web — Taksonomi Muta
 Setiap topik merupakan dokumen referensi yang terstruktur secara mendalam, mencakup seluruh permukaan serangan dari suatu kelas kerentanan melalui taksonomi tiga sumbu (Target Mutasi, Jenis Ketidaksesuaian/Bypass, Skenario Serangan).
 
 ## Topik
+
+### Injection
+
+| Kategori | Deskripsi |
+| --- | --- |
+| [SQL Injection](sql-injection.md) | Vektor mutasi injeksi SQL dan taksonomi bypass filter |
