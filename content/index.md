@@ -15,3 +15,4 @@ Setiap topik merupakan dokumen referensi yang terstruktur secara mendalam, menca
 | Kategori | Deskripsi |
 | --- | --- |
 | [SQL Injection](sql-injection.md) | Vektor mutasi injeksi SQL dan taksonomi bypass filter |
+| [NoSQL Injection](nosql-injection.md) | injeksi NoSQL operator, variasi sintaksis, dan ekstraksi buta |
