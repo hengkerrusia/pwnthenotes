@@ -1,5 +1,5 @@
 ---
-title: Taksonomi Mutasi/Variasai Payload Injeksi SQL
+title: SQL Injection
 description: Vektor mutasi injeksi SQL dan taksonomi bypass filter
 ---
 
