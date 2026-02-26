@@ -16,3 +16,5 @@ Setiap topik merupakan dokumen referensi yang terstruktur secara mendalam, menca
 | --- | --- |
 | [SQL Injection](sql-injection.md) | Vektor mutasi injeksi SQL dan taksonomi bypass filter |
 | [NoSQL Injection](nosql-injection.md) | injeksi NoSQL operator, variasi sintaksis, dan ekstraksi buta |
+| [Command Injection](command-injection.md) | vektor mutasi injeksi command dan taksonomi bypass filter |
+| [XSS](xss.md) | vektor mutasi injeksi XSS dan taksonomi bypass filter |
