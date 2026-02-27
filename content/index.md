@@ -30,3 +30,16 @@ Setiap topik merupakan dokumen referensi yang terstruktur secara mendalam, menca
 | [ORM Misuse → SQL Injection](injection/orm-misue-sql-injection.md) | Penyalahgunaan fungsi query ORM yang menyebabkan SQL injection |
 | [CSV Formula Injection](injection/csv-formula-injection.md) | Injeksi formula spreadsheet melalui fungsionalitas ekspor CSV/Excel |
 | [CSS Injection](injection/css-injection.md) | Eksfiltrasi data berbasis CSS dan serangan style injection |
+
+## Authentication & Authorization
+| Kategori | Deskripsi |
+| --- | --- |
+| [Authentication Bypass & SSO](auth/authentication-sso-bypass.md) | Pola bypass autentikasi dan mekanisme Single Sign-On. |
+| [OAuth](auth/oauth.md) | Eksploitasi OAuth 2.0 flow dan pola pencurian token. |
+| [JWT](auth/jwt.md) | Algoritma confusion pada JSON Web Token, key injection, dan penyalahgunaan claim. |
+| [SAML](auth/saml.md) | Pemalsuan SAML assertion, signature wrapping, dan diferensial pada parser. |
+| [CORS Misconfiguration](auth/cors.md) | Pola eksploitasi miskonfigurasi Cross-Origin Resource Sharing. |
+| [IDOR / BOLA](auth/idor.md) | Broken Object Level Authorization dan manipulasi reference. |
+| [Account Takeover](auth/ATO.md) | Rantai bypass autentikasi dan eksploitasi pada pemulihan akun (account recovery). |
+| [Mass Assignment](auth/mass-assigment.md) | Penyalahgunaan parameter binding dan injeksi hidden field. |
+| [Cryptographic Implementation Vulnerabilities](auth/cryto.md) | Celah keamanan pada implementasi kriptografi dalam konteks web dan pola bypass-nya. |
