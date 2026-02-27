@@ -275,6 +275,25 @@ Dalam blind IDOR, tindakan penyerang berhasil pada objek korban, tetapi penyeran
 
 Efek eksploitasi bermanifestasi di *fungsionalitas yang berbeda* atau pada *waktu yang lebih lambat* dari injeksi awal. Pola umum meliputi object reference yang disuntikkan muncul di laporan/ekspor yang dihasilkan (di mana batch job memproses referensi tersimpan tanpa memeriksa ulang otorisasi) atau target notifikasi yang dimodifikasi (misalnya URL webhook) pada objek pengguna lain yang menyebabkan eksfiltrasi data melalui pipeline notifikasi.
 
+### §6-4. UI-Layer Information Disclosure via Failed Operation
+
+Dalam pola ini, server memproses object reference yang tidak diotorisasi cukup jauh untuk
+mengekspos **konten** objek di lapisan UI/frontend, meskipun operasi API secara formal
+dikembalikan sebagai error. Berbeda dengan §6-2 yang hanya mengkonfirmasi *keberadaan*
+objek melalui perbedaan pesan error, §6-4 mengekspos *konten aktual* objek melalui
+side-effect rendering — tanpa data tersebut pernah muncul di HTTP response body.
+
+Pola ini paling sering muncul pada aplikasi SPA modern yang menggunakan GraphQL, karena
+spesifikasi GraphQL memperbolehkan `data` dan `errors` hadir bersamaan dalam satu respons,
+dan framework seperti Apollo Client atau React Query melakukan optimistic update atau
+partial cache population sebelum error handling selesai dieksekusi.
+
+| Subtipe                                 | Mekanisme                                                                                                                                                                                                        | Kondisi Utama                                                                                                                                                                     |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Mutation-triggered UI render leak**   | Mutation gagal di API level (`NOT_FOUND`/`FORBIDDEN`), tetapi UI tetap merender nama atau atribut objek yang direferensikan di halaman attacker                                                                  | Server memproses referensi objek cukup jauh untuk menulis ke UI state sebelum permission check final; atau frontend tidak memisahkan "operasi berhasil" dari "objek ada di store" |
+| **Optimistic update disclosure**        | Framework frontend melakukan optimistic update sebelum konfirmasi server — state optimistic mengekspos data objek korban dan tidak di-rollback dengan benar                                                      | Optimistic update diimplementasikan tanpa rollback atomik; atau rollback terjadi setelah data sudah ter-render dalam window yang cukup untuk dibaca                               |
+| **GraphQL partial response cache leak** | GraphQL mengembalikan `{"data": null, "errors": [...]}` namun Apollo Client / client cache mempopulasi store dari partial data sebelum error di-handle, sehingga data objek korban dapat diakses via cache query | GraphQL client tidak membersihkan cache entry untuk operasi yang gagal; normalized cache menyimpan fragment objek meski mutation ditolak                                          |
+
 ---
 
 ## §7. Manipulasi Temporal dan Berbasis State
@@ -345,19 +364,20 @@ Arsitektur deployment aplikasi modern menciptakan celah otorisasi di batas-batas
 
 ## Pemetaan CVE / Bug Bounty (2023–2025)
 
-| Kombinasi Mutasi | CVE / Kasus | Dampak / Bounty |
-|-----------------|------------|-----------------|
-| §1-1 + §4-1 (Sequential ID + REST sub-resource) | CVE-2024-1313 (Grafana) | Akses snapshot dashboard oleh pengguna yang tidak terautentikasi di Grafana (20 juta+ pengguna). Patch di v10.4.1 |
-| §1-1 + §5-3 (Sequential ID + multi-tenant) | CVE-2024-46528 (KubeSphere v3.4.1/v4.1.1) | Pengguna berhak rendah mengakses resource cluster Kubernetes sensitif lintas tenant |
-| §4-1 + §5-1 (REST endpoint + horizontal access) | CVE-2023-3285 hingga CVE-2023-3290 (Easy!Appointments) | 6 kerentanan BOLA dalam rentang CVE ini. Akses penuh ke data pasien/janji temu |
-| §4-1 + §8-1 (REST + microservice trust) | CVE-2024-22278 (Harbor) | BOLA di container registry cloud-native; akses tidak diotorisasi ke container image dan repositori |
-| §1-1 + §2-1 (Sequential ID + path param) | CVE-2024-56404 (One Identity Manager 9.x) | IDOR di sistem manajemen identitas; akses ke record identitas di seluruh perusahaan |
-| §2-3 + §5-2 (Body param + mass assignment) | CVE-2024-1626 (Lunary AI) | IDOR di platform AI yang memungkinkan akses data tidak diotorisasi |
-| §1-1 + §5-1 (Numeric ID + horizontal) | CVE-2024-55471 (Oqtane Framework) | IDOR yang memungkinkan akses data lintas pengguna dalam framework CMS .NET |
-| §1-1 + §2-1 (Numeric param + path param) | CVE-2025-40658 (DM Corporative CMS < 2025.01) | CVSS 7.5. IDOR di panel admin melalui manipulasi parameter `option` di `/administer/selectionnode/framesSelection.asp`. |
-| §1-1 + §6-1 (Enumerable ID + direct feedback) | HackerOne #PayPal | $10.500. IDOR untuk menambahkan pengguna sekunder dalam manajemen akun bisnis PayPal |
-| §6-2 + §3-1 (Blind IDOR + method bypass) | HackerOne #various | $12.500. IDOR yang memungkinkan penghapusan lisensi/sertifikasi dari profil pengguna lain |
-| §5-3 + §8-3 (Cross-tenant + cloud) | Growatt Solar IoT (2025) | BOLA dalam API inverter surya memungkinkan peretas mengambil kendali perangkat IoT lintas organisasi |
+| Kombinasi Mutasi                                | CVE / Kasus                                                                                  | Dampak / Bounty                                                                                                         |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| §1-1 + §4-1 (Sequential ID + REST sub-resource) | CVE-2024-1313 (Grafana)                                                                      | Akses snapshot dashboard oleh pengguna yang tidak terautentikasi di Grafana (20 juta+ pengguna). Patch di v10.4.1       |
+| §1-1 + §5-3 (Sequential ID + multi-tenant)      | CVE-2024-46528 (KubeSphere v3.4.1/v4.1.1)                                                    | Pengguna berhak rendah mengakses resource cluster Kubernetes sensitif lintas tenant                                     |
+| §4-1 + §5-1 (REST endpoint + horizontal access) | CVE-2023-3285 hingga CVE-2023-3290 (Easy!Appointments)                                       | 6 kerentanan BOLA dalam rentang CVE ini. Akses penuh ke data pasien/janji temu                                          |
+| §4-1 + §8-1 (REST + microservice trust)         | CVE-2024-22278 (Harbor)                                                                      | BOLA di container registry cloud-native; akses tidak diotorisasi ke container image dan repositori                      |
+| §1-1 + §2-1 (Sequential ID + path param)        | CVE-2024-56404 (One Identity Manager 9.x)                                                    | IDOR di sistem manajemen identitas; akses ke record identitas di seluruh perusahaan                                     |
+| §2-3 + §5-2 (Body param + mass assignment)      | CVE-2024-1626 (Lunary AI)                                                                    | IDOR di platform AI yang memungkinkan akses data tidak diotorisasi                                                      |
+| §1-1 + §5-1 (Numeric ID + horizontal)           | CVE-2024-55471 (Oqtane Framework)                                                            | IDOR yang memungkinkan akses data lintas pengguna dalam framework CMS .NET                                              |
+| §1-1 + §2-1 (Numeric param + path param)        | CVE-2025-40658 (DM Corporative CMS < 2025.01)                                                | CVSS 7.5. IDOR di panel admin melalui manipulasi parameter `option` di `/administer/selectionnode/framesSelection.asp`. |
+| §1-1 + §6-1 (Enumerable ID + direct feedback)   | HackerOne #PayPal                                                                            | $10.500. IDOR untuk menambahkan pengguna sekunder dalam manajemen akun bisnis PayPal                                    |
+| §6-2 + §3-1 (Blind IDOR + method bypass)        | HackerOne #various                                                                           | $12.500. IDOR yang memungkinkan penghapusan lisensi/sertifikasi dari profil pengguna lain                               |
+| §5-3 + §8-3 (Cross-tenant + cloud)              | Growatt Solar IoT (2025)                                                                     | BOLA dalam API inverter surya memungkinkan peretas mengambil kendali perangkat IoT lintas organisasi                    |
+| §1-3 → §1-1 → §4-2 → §6-4                       | [IDOR Vulnerability at AddTagToAssets operation name](https://hackerone.com/reports/2633771) | Lead to disclose all of victim's new custom tags without any interaction with victim.                                   |
 
 ---
 
