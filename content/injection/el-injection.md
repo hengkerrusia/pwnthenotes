@@ -271,7 +271,7 @@ Objek context khusus OGNL dan manipulasi value stack.
 
 | Subtipe | Mekanisme | Kondisi Utama |
 |---------|-----------|---------------|
-| **#_memberAccess Overwrite** | Menimpa objek keamanan untuk mem-bypass sandbox (CVE-2020-17530) | OGNL tanpa sandboxing yang tepat |
+| **`#_memberAccess Overwrite`** | Menimpa objek keamanan untuk mem-bypass sandbox (CVE-2020-17530) | OGNL tanpa sandboxing yang tepat |
 | **Value Stack Access** | `#context['valueStack']` mengakses konteks action Struts | Framework Apache Struts |
 | **OgnlContext Manipulation** | Manipulasi langsung konteks evaluasi OGNL | Integrasi OGNL mendalam |
 
