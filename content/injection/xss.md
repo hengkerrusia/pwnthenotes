@@ -15,15 +15,15 @@ Taxonomi ini mengorganisir seluruh permukaan serangan Cross-Site Scripting (XSS)
 
 ### Ringkasan Sumbu 2: Tipe Defense Bypass
 
-| Tipe Bypass | Mekanisme | Berlaku Di Seluruh |
-|---|---|---|
-| **Encoding Differential** | Input di-decode secara berbeda oleh filter vs. browser (URL-encoding, HTML entities, Unicode, double-encoding) | Semua context |
-| **Parser Differential** | Sanitizer dan browser tidak setuju pada struktur DOM (mutation XSS, namespace confusion, node flattening) | §1, §2, §7 |
-| **WAF Evasion** | Struktur payload menghindari signature/regex detection (parameter pollution, case variation, comment insertion, null bytes) | Semua context |
-| **CSP Bypass** | Eksekusi tercapai meskipun ada Content Security Policy (JSONP endpoints, base-uri injection, nonce leakage, unsafe directive, form-action gap, polyglot same-origin scripts, dangling iframe) | §1, §3, §4, §10-3, §11-3 |
-| **Sanitizer Bypass** | Input bertahan melalui HTML sanitization library (DOMPurify, Bleach) via mutation, prototype pollution, atau regex flaws | §1, §2, §7 |
-| **Framework Bypass** | Mengeksploitasi rendering spesifik framework (React dangerouslySetInnerHTML, Angular template injection, Vue v-html) | §3, §9 |
-| **Protocol-Level** | Cookie parsing differentials, CRLF injection, content-type sniffing untuk mencapai script execution | §4, §10 |
+| Tipe Bypass               | Mekanisme                                                                                                                                                                                     | Berlaku Di Seluruh       |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| **Encoding Differential** | Input di-decode secara berbeda oleh filter vs. browser (URL-encoding, HTML entities, Unicode, double-encoding)                                                                                | Semua context            |
+| **Parser Differential**   | Sanitizer dan browser tidak setuju pada struktur DOM (mutation XSS, namespace confusion, node flattening)                                                                                     | §1, §2, §7               |
+| **WAF Evasion**           | Struktur payload menghindari signature/regex detection (parameter pollution, case variation, comment insertion, null bytes)                                                                   | Semua context            |
+| **CSP Bypass**            | Eksekusi tercapai meskipun ada Content Security Policy (JSONP endpoints, base-uri injection, nonce leakage, unsafe directive, form-action gap, polyglot same-origin scripts, dangling iframe) | §1, §3, §4, §10-3, §11-3 |
+| **Sanitizer Bypass**      | Input bertahan melalui HTML sanitization library (DOMPurify, Bleach) via mutation, prototype pollution, atau regex flaws                                                                      | §1, §2, §7               |
+| **Framework Bypass**      | Mengeksploitasi rendering spesifik framework (React dangerouslySetInnerHTML, Angular template injection, Vue v-html)                                                                          | §3, §9                   |
+| **Protocol-Level**        | Cookie parsing differentials, CRLF injection, content-type sniffing untuk mencapai script execution                                                                                           | §4, §10                  |
 
 ### Konsep Fundamental: Browser Parsing Pipeline
 
