@@ -14,19 +14,19 @@ Setiap topik merupakan dokumen referensi yang terstruktur secara mendalam, menca
 
 | Kategori | Deskripsi |
 | --- | --- |
-| [SQL Injection](sql-injection.md) | Vektor mutasi SQL injection dan taksonomi bypass filter |
-| [NoSQL Injection](nosql-injection.md) | Operator NoSQL injection, variasi sintaks, dan blind extraction |
-| [Command Injection](command-injection.md) | Chaining OS command injection, penghindaran filter, dan mutasi spesifik shell |
-| [XSS](xss.md) | Payload Cross-Site Scripting yang bergantung pada konteks dan bypass filter |
-| [SSTI](SSTI.md) | Server-Side Template Injection di berbagai template engine |
-| [EL Injection](el-injection.md) | Expression Language injection dalam ekosistem Java EE / Spring |
-| [XXE](xxe.md) | XML External Entity injection, eksfiltrasi OOB, dan diferensial parser |
-| [LDAP / XPath Injection](ldap-xpath.md) | Taksonomi mutasi query injection pada LDAP dan XPath |
-| [Prototype Pollution](prototype-pollution.md) | Vektor JavaScript prototype chain pollution dan gadget chains |
-| [GraphQL](graphql.md) | Penyalahgunaan introspeksi GraphQL, batching attacks, dan vektor injeksi |
-| [LaTeX Injection](latex-injection.md) | Vektor mutasi LaTeX injection dan eksploitasi pemrosesan dokumen |
-| [Protocol-Level Injection](protocol-level-injection.md) | Injeksi tingkat protokol pada SMTP, LDAP, dan protokol wire lainnya |
-| [SSI / ESI / XSLT Injection](ssi-esi-xslt-injection.md) | Injeksi Server-Side Includes, Edge Side Includes, dan XSLT untuk RCE |
-| [ORM Misuse → SQL Injection](orm-misue-sql-injection.md) | Penyalahgunaan fungsi query ORM yang menyebabkan SQL injection |
-| [CSV Formula Injection](csv-formula-injection.md) | Injeksi formula spreadsheet melalui fungsionalitas ekspor CSV/Excel |
-| [CSS Injection](css-injection.md) | Eksfiltrasi data berbasis CSS dan serangan style injection |
+| [SQL Injection](injection/sql-injection.md) | Vektor mutasi SQL injection dan taksonomi bypass filter |
+| [NoSQL Injection](injection/nosql-injection.md) | Operator NoSQL injection, variasi sintaks, dan blind extraction |
+| [Command Injection](injection/command-injection.md) | Chaining OS command injection, penghindaran filter, dan mutasi spesifik shell |
+| [XSS](injection/xss.md) | Payload Cross-Site Scripting yang bergantung pada konteks dan bypass filter |
+| [SSTI](injection/SSTI.md) | Server-Side Template Injection di berbagai template engine |
+| [EL Injection](injection/el-injection.md) | Expression Language injection dalam ekosistem Java EE / Spring |
+| [XXE](injection/xxe.md) | XML External Entity injection, eksfiltrasi OOB, dan diferensial parser |
+| [LDAP / XPath Injection](injection/ldap-xpath.md) | Taksonomi mutasi query injection pada LDAP dan XPath |
+| [Prototype Pollution](injection/prototype-pollution.md) | Vektor JavaScript prototype chain pollution dan gadget chains |
+| [GraphQL](injection/graphql.md) | Penyalahgunaan introspeksi GraphQL, batching attacks, dan vektor injeksi |
+| [LaTeX Injection](injection/latex-injection.md) | Vektor mutasi LaTeX injection dan eksploitasi pemrosesan dokumen |
+| [Protocol-Level Injection](injection/protocol-level-injection.md) | Injeksi tingkat protokol pada SMTP, LDAP, dan protokol wire lainnya |
+| [SSI / ESI / XSLT Injection](injection/ssi-esi-xslt-injection.md) | Injeksi Server-Side Includes, Edge Side Includes, dan XSLT untuk RCE |
+| [ORM Misuse → SQL Injection](injection/orm-misue-sql-injection.md) | Penyalahgunaan fungsi query ORM yang menyebabkan SQL injection |
+| [CSV Formula Injection](injection/csv-formula-injection.md) | Injeksi formula spreadsheet melalui fungsionalitas ekspor CSV/Excel |
+| [CSS Injection](injection/css-injection.md) | Eksfiltrasi data berbasis CSS dan serangan style injection |
